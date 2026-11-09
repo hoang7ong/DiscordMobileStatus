@@ -1,0 +1,11 @@
+.tools/
+dist/
+android/build/
+android/khoa_ky/
+YTStatus.json
+YTStatus.log*
+*.exe
+*.apk
+*.idsig
+PHAT_HANH.bat
+tools/
