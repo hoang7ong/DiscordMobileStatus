@@ -49,6 +49,7 @@ Mở YouTube trên trình duyệt phát một bài là trạng thái Discord đ�
 | Bấm biểu tượng ở khay | Mở lại cửa sổ |
 | Chuột phải biểu tượng › **Thoát** | Tắt hẳn |
 | Tick **Tắt hiện lên Discord** | App vẫn chạy nhưng không hiện gì |
+| Bỏ tick **Chia sẻ YouTube Music** / **Chia sẻ YouTube** | Tạm không hiện loại đó (cũng có trong menu chuột phải ở khay) |
 | Ô **Tiếng Việt / English** (góc trên) | Đổi ngôn ngữ ngay |
 
 Cấu hình lưu ở `YTStatus.json` cạnh file exe. Muốn bỏ: bỏ tick "Chạy cùng Windows", Thoát, xóa file.

@@ -51,6 +51,7 @@ Play something on YouTube in your browser and your Discord status follows.
 | Click the tray icon | Opens the window again |
 | Right-click the tray icon › **Exit** | Quits completely |
 | Tick **Don't show on Discord** | Keeps running but shows nothing |
+| Untick **Share YouTube Music** / **Share YouTube** | Stops showing that one for now (also in the tray right-click menu) |
 | **Tiếng Việt / English** box (top right) | Switches language instantly |
 
 Settings are saved in `YTStatus.json` next to the exe. To remove it: untick "Start with Windows", Exit, delete the files.

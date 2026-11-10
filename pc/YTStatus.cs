@@ -22,8 +22,8 @@ using System.Threading.Tasks;
 [assembly: System.Reflection.AssemblyTitle("YT Status")]
 [assembly: System.Reflection.AssemblyProduct("YT Status")]
 [assembly: System.Reflection.AssemblyDescription("Shows what you play on YouTube / YouTube Music as your Discord status")]
-[assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.1.0")]
 
 namespace YTStatus
 {
@@ -34,6 +34,22 @@ namespace YTStatus
 
         [DllImport("user32.dll")]
         static extern bool AllowSetForegroundWindow(int pid);
+
+        [DllImport("psapi.dll")]
+        static extern bool EmptyWorkingSet(IntPtr hProcess);
+
+        /// <summary>Trả RAM không dùng tới cho Windows (gọi khi app chạy ẩn).</summary>
+        public static void TrimMemory()
+        {
+            try
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                using (Process p = Process.GetCurrentProcess()) EmptyWorkingSet(p.Handle);
+            }
+            catch (Exception) { }
+        }
 
         [STAThread]
         static void Main(string[] args)
@@ -178,6 +194,8 @@ namespace YTStatus
         public bool Hidden = false;          // "Tạm ẩn trạng thái"
         public bool Balloon = true;          // lần đầu bấm X thì nhắc "app vẫn chạy dưới khay"
         public bool UsePc = true;            // đọc YouTube đang phát trên trình duyệt của chính máy này
+        public bool ShareMusic = true;       // chia sẻ bài YouTube Music lên Discord
+        public bool ShareVideo = true;       // chia sẻ video YouTube lên Discord
         public string ArtTopic = "";         // kênh ntfy riêng để tải ảnh bìa từ PC lên (Discord cần link ảnh công khai)
         public string Lang = "";             // "vi" hoặc "en"; trống = theo ngôn ngữ Windows
 
@@ -226,6 +244,8 @@ namespace YTStatus
                 c.Hidden = U.Bool(d, "tam_an");
                 c.Balloon = U.Get(d, "nhac_khay") == null || U.Bool(d, "nhac_khay");
                 c.UsePc = U.Get(d, "trinh_duyet_pc") == null || U.Bool(d, "trinh_duyet_pc");
+                c.ShareMusic = U.Get(d, "chia_se_ytmusic") == null || U.Bool(d, "chia_se_ytmusic");
+                c.ShareVideo = U.Get(d, "chia_se_youtube") == null || U.Bool(d, "chia_se_youtube");
                 c.ArtTopic = U.Str(d, "kenh_anh") ?? "";
                 c.Lang = U.Str(d, "ngon_ngu") ?? "";
             }
@@ -244,6 +264,8 @@ namespace YTStatus
             d["tam_an"] = Hidden;
             d["nhac_khay"] = Balloon;
             d["trinh_duyet_pc"] = UsePc;
+            d["chia_se_ytmusic"] = ShareMusic;
+            d["chia_se_youtube"] = ShareVideo;
             d["kenh_anh"] = ArtTopic;
             d["ngon_ngu"] = Lang;
             File.WriteAllText(FilePath, U.Json.Serialize(d), new UTF8Encoding(false));
@@ -258,6 +280,9 @@ namespace YTStatus
             if (!s.StartsWith("http://") && !s.StartsWith("https://")) s = "https://" + s;
             return s;
         }
+
+        /// <summary>Loại này (YouTube / YouTube Music) có đang bật chia sẻ không.</summary>
+        public bool Shares(Track t) { return t != null && (t.App == "youtube" ? ShareVideo : ShareMusic); }
 
         public string ClientIdFor(Track t)
         {
@@ -539,7 +564,22 @@ namespace YTStatus
             return false;
         }
 
+        // cùng bài thì khỏi quét lại các cửa sổ liên tục: quét lại sau 10 s (đã nhận ra) / 4 s (chưa nhận ra)
+        static string lastKey;
+        static string lastApp;
+        static DateTime lastScan = DateTime.MinValue;
+
         static string Classify(string title, string sourceId)
+        {
+            string key = title + "\n" + sourceId;
+            if (key == lastKey && (DateTime.UtcNow - lastScan).TotalSeconds < (lastApp != null ? 10 : 4)) return lastApp;
+            lastKey = key;
+            lastScan = DateTime.UtcNow;
+            lastApp = ClassifyNow(title, sourceId);
+            return lastApp;
+        }
+
+        static string ClassifyNow(string title, string sourceId)
         {
             string src = (sourceId ?? "").ToLowerInvariant();
             foreach (string n in NotBrowser) if (src.Contains(n)) return null;
@@ -574,6 +614,7 @@ namespace YTStatus
         static Type tMgr, tSession, tProps;
         static MethodInfo asTaskGeneric, asStreamForRead;
         static object mgr;
+        static MethodInfo getEnum;
 
         static void Init()
         {
@@ -609,22 +650,45 @@ namespace YTStatus
         static object Await(object op, Type opType)
         {
             Type res = opType.GetGenericArguments()[0];
-            Task t = (Task)asTaskGeneric.MakeGenericMethod(res).Invoke(null, new object[] { op });
+            MethodInfo at;
+            lock (awaitCache)
+            {
+                if (!awaitCache.TryGetValue(res, out at)) { at = asTaskGeneric.MakeGenericMethod(res); awaitCache[res] = at; }
+            }
+            Task t = (Task)at.Invoke(null, new object[] { op });
             if (!t.Wait(5000)) throw new TimeoutException("Windows không trả lời");
-            return t.GetType().GetProperty("Result").GetValue(t, null);
+            Type tt = t.GetType();
+            PropertyInfo rp;
+            lock (resultCache)
+            {
+                if (!resultCache.TryGetValue(tt, out rp)) { rp = tt.GetProperty("Result"); resultCache[tt] = rp; }
+            }
+            return rp.GetValue(t, null);
         }
+
+        // tra cứu reflection chỉ làm 1 lần cho mỗi (kiểu, tên) rồi nhớ lại -> mỗi lần đọc rất nhẹ
+        static readonly Dictionary<string, PropertyInfo> propCache = new Dictionary<string, PropertyInfo>();
+        static readonly Dictionary<string, MethodInfo> methCache = new Dictionary<string, MethodInfo>();
+        static readonly Dictionary<Type, MethodInfo> awaitCache = new Dictionary<Type, MethodInfo>();
+        static readonly Dictionary<Type, PropertyInfo> resultCache = new Dictionary<Type, PropertyInfo>();
 
         /// <summary>Tìm thuộc tính trên kiểu hoặc các interface cha của nó.</summary>
         static PropertyInfo FindProp(Type t, string name)
         {
-            PropertyInfo p = t.GetProperty(name);
-            if (p != null) return p;
-            foreach (Type i in t.GetInterfaces())
+            string key = t.FullName + "|" + name;
+            PropertyInfo p;
+            lock (propCache) { if (propCache.TryGetValue(key, out p)) return p; }
+            p = t.GetProperty(name);
+            if (p == null)
             {
-                p = i.GetProperty(name);
-                if (p != null) return p;
+                foreach (Type i in t.GetInterfaces())
+                {
+                    p = i.GetProperty(name);
+                    if (p != null) break;
+                }
             }
-            return null;
+            lock (propCache) propCache[key] = p;
+            return p;
         }
 
         static object Get(object o, Type t, string name)
@@ -635,7 +699,16 @@ namespace YTStatus
 
         static object Call(object o, Type t, string name, out Type ret)
         {
-            MethodInfo m = t.GetMethod(name, Type.EmptyTypes);
+            string key = t.FullName + "|" + name;
+            MethodInfo m;
+            lock (methCache)
+            {
+                if (!methCache.TryGetValue(key, out m))
+                {
+                    m = t.GetMethod(name, Type.EmptyTypes);
+                    methCache[key] = m;
+                }
+            }
             ret = m.ReturnType;
             return m.Invoke(o, null);
         }
@@ -653,8 +726,8 @@ namespace YTStatus
             Init();
             Type listType;
             object list = Call(mgr, tMgr, "GetSessions", out listType);
-            Type enumType = typeof(IEnumerable<>).MakeGenericType(tSession);
-            System.Collections.IEnumerator en = (System.Collections.IEnumerator)enumType.GetMethod("GetEnumerator").Invoke(list, null);
+            if (getEnum == null) getEnum = typeof(IEnumerable<>).MakeGenericType(tSession).GetMethod("GetEnumerator");
+            System.Collections.IEnumerator en = (System.Collections.IEnumerator)getEnum.Invoke(list, null);
             Info best = null;
             while (en.MoveNext())
             {
@@ -891,9 +964,10 @@ namespace YTStatus
 
         public void Start()
         {
-            Thread t1 = new Thread(ListenLoop); t1.IsBackground = true; t1.Name = "ntfy"; t1.Start();
-            Thread t2 = new Thread(WorkLoop); t2.IsBackground = true; t2.Name = "discord"; t2.Start();
-            Thread t3 = new Thread(PcLoop); t3.IsBackground = true; t3.Name = "pc"; t3.Start();
+            // các luồng nền chạy ưu tiên thấp, không giành CPU với game / trình duyệt
+            Thread t1 = new Thread(ListenLoop); t1.IsBackground = true; t1.Name = "ntfy"; t1.Priority = ThreadPriority.BelowNormal; t1.Start();
+            Thread t2 = new Thread(WorkLoop); t2.IsBackground = true; t2.Name = "discord"; t2.Priority = ThreadPriority.BelowNormal; t2.Start();
+            Thread t3 = new Thread(PcLoop); t3.IsBackground = true; t3.Name = "pc"; t3.Priority = ThreadPriority.Lowest; t3.Start();
         }
 
         public void Reconfigure(Config c)
@@ -942,29 +1016,41 @@ namespace YTStatus
         }
 
         /// <summary>Gửi lại 4 dòng trạng thái cho cửa sổ (theo ngôn ngữ hiện tại).</summary>
-        public void Emit()
+        string lastEmit;
+
+        public void Emit() { Emit(false); }
+
+        void Emit(bool force)
         {
             Action<string, string, string, string> h = StatusChanged;
-            if (h != null) h(stPhone(), stPc(), stDiscord(), stNow());
+            if (h == null) return;
+            string a = stPhone(), b = stPc(), c = stDiscord(), d = stNow();
+            string sig = a + "\u0001" + b + "\u0001" + c + "\u0001" + d;
+            if (!force && sig == lastEmit) return;      // không đổi -> khỏi vẽ lại
+            lastEmit = sig;
+            h(a, b, c, d);
         }
 
         /// <summary>Đổi ngôn ngữ: vẽ lại trạng thái + đặt lại dòng Discord (chữ "Tạm dừng").</summary>
         public void Relabel()
         {
             forceReapply = true;
-            Emit();
+            Emit(true);
             wake.Set();
         }
 
         /// <summary>Đang phát trên PC &gt; đang phát trên điện thoại &gt; tạm dừng trên PC &gt; tạm dừng trên điện thoại.</summary>
-        Track Pick()
+        Track Pick() { return Pick(true); }
+
+        /// <param name="onlyShared">true = bỏ qua loại đang tắt chia sẻ (YouTube / YouTube Music).</param>
+        Track Pick(bool onlyShared)
         {
             Config c = Cfg;
             long now = U.NowMs();
             lock (trackLock)
             {
-                Track pc = pcTrack != null && !pcTrack.Expired(c.ShowPaused, now) ? pcTrack : null;
-                Track ph = track != null && !track.Expired(c.ShowPaused, now) ? track : null;
+                Track pc = pcTrack != null && !pcTrack.Expired(c.ShowPaused, now) && (!onlyShared || c.Shares(pcTrack)) ? pcTrack : null;
+                Track ph = track != null && !track.Expired(c.ShowPaused, now) && (!onlyShared || c.Shares(track)) ? track : null;
                 if (pc != null && pc.Playing) return pc;
                 if (ph != null && ph.Playing) return ph;
                 return pc ?? ph;
@@ -977,12 +1063,14 @@ namespace YTStatus
         void PcLoop()
         {
             bool failedOnce = false;
+            int idle = 0;                       // số lần liền không thấy YouTube -> đọc thưa dần (2 s ... 8 s)
             while (!stopping)
             {
-                Thread.Sleep(2000);
+                Thread.Sleep(idle < 5 ? 2000 : idle < 15 ? 4000 : 8000);
                 Config c = Cfg;
                 if (!c.UsePc || !PcMedia.Supported)
                 {
+                    idle = 0;
                     bool had;
                     lock (trackLock) { had = pcTrack != null; pcTrack = null; }
                     if (had) wake.Set();
@@ -998,6 +1086,7 @@ namespace YTStatus
                     string note;
                     PcMedia.Info i = PcMedia.Read(false, out note);
                     failedOnce = false;
+                    if (i == null || !i.Playing) idle++; else idle = 0;
                     if (i == null)
                     {
                         if (old != null)
@@ -1229,6 +1318,8 @@ namespace YTStatus
             Config c = Cfg;
             if (forceReapply) { forceReapply = false; shownSig = null; }
             Track tr = Pick();
+            Track raw = tr == null ? Pick(false) : null;      // có bài nhưng loại đó đang tắt chia sẻ?
+            string offApp = raw == null ? null : (raw.App == "youtube" ? "YouTube" : "YouTube Music");
             long now = U.NowMs();
             if (now < demoUntil) tr = Track.Demo();
             else if (c.Hidden) tr = null;
@@ -1254,7 +1345,7 @@ namespace YTStatus
                 {
                     shownSig = null;
                     bool hid = c.Hidden;
-                    Status(null, () => L.T("Chờ", "Waiting"), () => hid ? L.HiddenText() : L.T("Không có gì", "Nothing"));
+                    Status(null, () => L.T("Chờ", "Waiting"), () => IdleText(hid, offApp));
                     return;
                 }
                 if (string.IsNullOrEmpty(cid)) throw new RpcException(L.T("Chưa nhập Client ID", "No Client ID entered"));
@@ -1279,9 +1370,16 @@ namespace YTStatus
                 Log.W("Trạng thái Discord: đã ẩn");
                 string user2 = rpc.User;
                 bool hid2 = c.Hidden;
-                Status(null, () => L.T("Đã nối (", "Connected (") + user2 + ")", () => hid2 ? L.HiddenText() : L.T("Không có gì", "Nothing"));
+                Status(null, () => L.T("Đã nối (", "Connected (") + user2 + ")", () => IdleText(hid2, offApp));
             }
             shownSig = sig;
+        }
+
+        static string IdleText(bool hidden, string offApp)
+        {
+            if (hidden) return L.HiddenText();
+            if (offApp != null) return L.T("Đang tắt chia sẻ " + offApp, offApp + " sharing is off");
+            return L.T("Không có gì", "Nothing");
         }
 
         /// <summary>Discord bản cũ từ chối trường mới -> lùi dần: bỏ trường mới, rồi đổi sang "Đang chơi".</summary>
@@ -1319,7 +1417,7 @@ namespace YTStatus
         ToolStripMenuItem miHide;
         Label lblPhone, lblPc, lblDiscord, lblNow;
         TextBox txtChannel, txtMusic, txtVideo;
-        CheckBox chkStartup, chkPaused, chkHidden, chkPc;
+        CheckBox chkStartup, chkPaused, chkHidden, chkPc, chkMusic, chkVideo;
         Button btnSave, btnTest, btnTray;
         bool loading;
         // nhãn cần đổi chữ khi đổi ngôn ngữ
@@ -1327,7 +1425,7 @@ namespace YTStatus
         GroupBox gStatus, gConfig;
         LinkLabel lnkDev;
         ComboBox cboLang;
-        ToolStripMenuItem miOpen, miExit;
+        ToolStripMenuItem miOpen, miExit, miMusic, miVideo;
 
         public MainForm(bool startHidden, EventWaitHandle showEvt)
         {
@@ -1355,6 +1453,7 @@ namespace YTStatus
             engine = new Engine(cfg.Copy());
             engine.StatusChanged += OnStatus;
             engine.Start();
+            if (!allowShow) ScheduleTrim(15000);       // khởi động ẩn cùng Windows -> trả RAM khởi động thừa
 
             Thread t = new Thread(delegate ()
             {
@@ -1435,7 +1534,7 @@ namespace YTStatus
 
             gConfig = new GroupBox();
             gConfig.Location = new Point(16, 208);
-            gConfig.Size = new Size(408, 262);
+            gConfig.Size = new Size(408, 288);
             Controls.Add(gConfig);
             txtChannel = Field(gConfig, 20, out fChannel);
             txtMusic = Field(gConfig, 70, out fMusic);
@@ -1446,6 +1545,8 @@ namespace YTStatus
             chkHidden = Check(gConfig, 214, 176);
             chkPc = Check(gConfig, 12, 228);
             chkPc.Size = new Size(380, 22);
+            chkMusic = Check(gConfig, 12, 254);
+            chkVideo = Check(gConfig, 214, 254);
             lnkDev = new LinkLabel();
             lnkDev.AutoSize = true;
             lnkDev.Location = new Point(214, 205);
@@ -1476,6 +1577,8 @@ namespace YTStatus
             chkPaused.CheckedChanged += delegate { if (!loading) SaveFlags(); };
             chkHidden.CheckedChanged += delegate { if (!loading) SaveFlags(); };
             chkPc.CheckedChanged += delegate { if (!loading) SaveFlags(); };
+            chkMusic.CheckedChanged += delegate { if (!loading) SaveFlags(); };
+            chkVideo.CheckedChanged += delegate { if (!loading) SaveFlags(); };
 
             // khay hệ thống
             ContextMenuStrip menu = new ContextMenuStrip();
@@ -1484,9 +1587,16 @@ namespace YTStatus
             miOpen.Click += delegate { ShowFromTray(); };
             miHide = new ToolStripMenuItem();
             miHide.Click += delegate { chkHidden.Checked = !chkHidden.Checked; };
+            miMusic = new ToolStripMenuItem("YouTube Music");
+            miMusic.Click += delegate { chkMusic.Checked = !chkMusic.Checked; };
+            miVideo = new ToolStripMenuItem("YouTube");
+            miVideo.Click += delegate { chkVideo.Checked = !chkVideo.Checked; };
             miExit = new ToolStripMenuItem();
             miExit.Click += delegate { ExitApp(); };
             menu.Items.Add(miOpen);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(miMusic);
+            menu.Items.Add(miVideo);
             menu.Items.Add(miHide);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(miExit);
@@ -1499,7 +1609,7 @@ namespace YTStatus
             tray.Visible = true;
             tray.MouseClick += delegate (object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ShowFromTray(); };
 
-            ClientSize = new Size(440, 528);
+            ClientSize = new Size(440, 554);
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             ResumeLayout(false);
@@ -1547,7 +1657,7 @@ namespace YTStatus
         Button Btn(int x)
         {
             Button b = new Button();
-            b.Location = new Point(x, 482);
+            b.Location = new Point(x, 508);
             b.Size = new Size(128, 32);
             b.FlatStyle = FlatStyle.System;      // nút chuẩn Windows, chữ căn giữa
             b.TextAlign = ContentAlignment.MiddleCenter;
@@ -1580,6 +1690,10 @@ namespace YTStatus
             btnTray.Text = L.T("Ẩn xuống khay", "Hide to tray");
             miOpen.Text = L.T("Mở YT Status", "Open YT Status");
             miHide.Text = L.T("Tắt hiện lên Discord", "Don't show on Discord");
+            chkMusic.Text = L.T("Chia sẻ YouTube Music", "Share YouTube Music");
+            chkVideo.Text = L.T("Chia sẻ YouTube", "Share YouTube");
+            miMusic.Text = L.T("Chia sẻ YouTube Music", "Share YouTube Music");
+            miVideo.Text = L.T("Chia sẻ YouTube", "Share YouTube");
             miExit.Text = L.T("Thoát", "Exit");
         }
 
@@ -1594,6 +1708,10 @@ namespace YTStatus
             chkHidden.Checked = cfg.Hidden;
             miHide.Checked = cfg.Hidden;
             chkPc.Checked = cfg.UsePc;
+            chkMusic.Checked = cfg.ShareMusic;
+            chkVideo.Checked = cfg.ShareVideo;
+            miMusic.Checked = cfg.ShareMusic;
+            miVideo.Checked = cfg.ShareVideo;
             if (!PcMedia.Supported) chkPc.Enabled = false;
             try { chkStartup.Checked = AutoStart.IsOn(); } catch (Exception) { }
             loading = false;
@@ -1628,6 +1746,8 @@ namespace YTStatus
             cfg.ShowPaused = chkPaused.Checked;
             cfg.Hidden = chkHidden.Checked;
             cfg.UsePc = chkPc.Checked;
+            cfg.ShareMusic = chkMusic.Checked;
+            cfg.ShareVideo = chkVideo.Checked;
             if (!WriteConfig()) return false;
             if (changed) engine.Reconfigure(cfg.Copy());
             else { engine.Cfg = cfg.Copy(); engine.Poke(); }
@@ -1640,7 +1760,11 @@ namespace YTStatus
             cfg.ShowPaused = chkPaused.Checked;
             cfg.Hidden = chkHidden.Checked;
             cfg.UsePc = chkPc.Checked;
+            cfg.ShareMusic = chkMusic.Checked;
+            cfg.ShareVideo = chkVideo.Checked;
             miHide.Checked = cfg.Hidden;
+            miMusic.Checked = cfg.ShareMusic;
+            miVideo.Checked = cfg.ShareVideo;
             WriteConfig();
             engine.Cfg = cfg.Copy();
             engine.Poke();
@@ -1663,6 +1787,10 @@ namespace YTStatus
             focus.Focus();
         }
 
+        // trạng thái mới nhất; cửa sổ đang ẩn thì chỉ cập nhật chữ ở khay, mở cửa sổ ra mới vẽ các dòng
+        string[] pending;
+        string lastTip;
+
         void OnStatus(string phone, string pc, string discord, string now)
         {
             if (!IsHandleCreated) return;
@@ -1670,21 +1798,56 @@ namespace YTStatus
             {
                 BeginInvoke(new Action(delegate
                 {
-                    lblPhone.Text = phone;
-                    lblPc.Text = pc;
-                    lblDiscord.Text = discord;
-                    lblNow.Text = now;
+                    pending = new string[] { phone, pc, discord, now };
                     string tip = "YT Status · " + now;
-                    tray.Text = tip.Length > 63 ? tip.Substring(0, 62) + "…" : tip;
+                    if (tip.Length > 63) tip = tip.Substring(0, 62) + "…";
+                    if (tip != lastTip) { lastTip = tip; tray.Text = tip; }
+                    if (Visible) PaintStatus();
                 }));
             }
             catch (Exception) { }
         }
 
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (Visible) PaintStatus();
+        }
+
+        void PaintStatus()
+        {
+            string[] p = pending;
+            if (p == null) return;
+            lblPhone.Text = p[0];
+            lblPc.Text = p[1];
+            lblDiscord.Text = p[2];
+            lblNow.Text = p[3];
+        }
+
         // ------------------------------------------------ khay
+        System.Windows.Forms.Timer trimTimer;
+
+        /// <summary>Sau vài giây chạy ẩn thì trả RAM không dùng cho Windows (một lần).</summary>
+        void ScheduleTrim(int ms)
+        {
+            if (trimTimer == null)
+            {
+                trimTimer = new System.Windows.Forms.Timer();
+                trimTimer.Tick += delegate
+                {
+                    trimTimer.Stop();
+                    if (!Visible) Program.TrimMemory();
+                };
+            }
+            trimTimer.Stop();
+            trimTimer.Interval = ms;
+            trimTimer.Start();
+        }
+
         void ShowFromTray()
         {
             allowShow = true;
+            PaintStatus();
             Show();
             if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
             Activate();
@@ -1694,6 +1857,7 @@ namespace YTStatus
         void HideToTray()
         {
             Hide();
+            ScheduleTrim(3000);
             if (cfg.Balloon)
             {
                 tray.ShowBalloonTip(4000, L.T("YT Status vẫn đang chạy", "YT Status is still running"),
