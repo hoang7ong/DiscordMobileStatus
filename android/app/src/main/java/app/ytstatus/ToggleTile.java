@@ -24,7 +24,7 @@ public class ToggleTile extends TileService {
         if (t == null) return;
         boolean on = Prefs.enabled(this);
         t.setState(on ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
-        t.setLabel("YT Status");
+        t.setLabel("Discord Status");
         if (android.os.Build.VERSION.SDK_INT >= 29) t.setSubtitle(on ? Prefs.t(this, "Đang chia sẻ", "Sharing") : Prefs.t(this, "Đã ẩn", "Hidden"));
         t.updateTile();
     }

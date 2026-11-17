@@ -4,6 +4,8 @@ android/build/
 android/khoa_ky/
 YTStatus.json
 YTStatus.log*
+DiscordMobileStatus.json
+DiscordMobileStatus.log*
 *.exe
 *.apk
 *.idsig

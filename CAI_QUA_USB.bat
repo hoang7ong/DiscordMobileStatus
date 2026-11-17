@@ -2,9 +2,9 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title Cai YT Status vao dien thoai qua cap USB
+title Cai Discord Mobile Status vao dien thoai qua cap USB
 echo ==============================================================
-echo   CAI YTStatus.apk VAO DIEN THOAI QUA CAP USB
+echo   CAI DiscordMobileStatus.apk VAO DIEN THOAI QUA CAP USB
 echo   (cach nay khong bi Google Play Protect chan)
 echo.
 echo   Truoc khi chay: tren dien thoai bat "Gỡ lỗi USB"
@@ -13,7 +13,7 @@ echo     Cai dat ^> Tuy chon nha phat trien ^> bat "Gỡ lỗi USB"
 echo   Cam cap, dien thoai hoi "Cho phep go loi USB?" thi bam Cho phep.
 echo ==============================================================
 echo.
-if not exist "YTStatus.apk" (echo [LOI] Chua co YTStatus.apk - chay BUILD_APK.bat truoc. & pause & exit /b 1)
+if not exist "DiscordMobileStatus.apk" (echo [LOI] Chua co DiscordMobileStatus.apk - chay BUILD_APK.bat truoc. & pause & exit /b 1)
 set "SDK=%~dp0.tools\android-sdk"
 set "ADB=%SDK%\platform-tools\adb.exe"
 if exist "%ADB%" goto co_adb
@@ -27,8 +27,8 @@ if not exist "%ADB%" (echo [LOI] Khong tai duoc adb. & pause & exit /b 1)
 echo Dang cho dien thoai (cam cap + bam Cho phep tren dien thoai) ...
 "%ADB%" wait-for-device
 echo Dang cai ...
-"%ADB%" install -r "YTStatus.apk"
+"%ADB%" install -r "DiscordMobileStatus.apk"
 if errorlevel 1 (echo [LOI] Cai that bai, xem thong bao phia tren. & pause & exit /b 1)
 echo.
-echo XONG. Mo app YT Status tren dien thoai. Co the tat "Gỡ lỗi USB" sau khi cai.
+echo XONG. Mo app Discord Mobile Status tren dien thoai. Co the tat "Gỡ lỗi USB" sau khi cai.
 pause

@@ -1,4 +1,4 @@
-# Build app Android "YT Status" KHONG can Android Studio / Gradle.
+# Build app Android "Discord Mobile Status" KHONG can Android Studio / Gradle.
 # Lan dau tai JDK 17 + Android build-tools (~600 MB) vao thu muc .tools ben canh. Lan sau ~20 giay.
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -12,8 +12,8 @@ $Sdk     = Join-Path $Tools "android-sdk"
 $BT_VER  = "34.0.0"
 $API     = "34"
 $MIN_SDK = "24"
-$VersionName = "1.0.1"
-$VersionCode = "10001"
+$VersionName = "1.1.1"
+$VersionCode = "10101"
 
 function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Yellow }
 function Fail($t) { Write-Host "[LOI] $t" -ForegroundColor Red; exit 1 }
@@ -116,7 +116,7 @@ if (-not (Test-Path $Ks)) {
     Run "$Jdk\bin\keytool.exe" @("-genkeypair", "-keystore", $Ks, "-alias", "ytstatus", "-keyalg", "RSA", "-keysize", "2048",
         "-validity", "10000", "-storepass", "ytstatus", "-keypass", "ytstatus", "-dname", "CN=YT Status, C=VN")
 }
-$Apk = Join-Path $Root "YTStatus.apk"
+$Apk = Join-Path $Root "DiscordMobileStatus.apk"
 Run "$BT\apksigner.bat" @("sign", "--ks", $Ks, "--ks-pass", "pass:ytstatus", "--key-pass", "pass:ytstatus",
     "--ks-key-alias", "ytstatus", "--out", $Apk, "$Out\aligned.apk")
 Run "$BT\apksigner.bat" @("verify", $Apk)
@@ -126,5 +126,5 @@ Remove-Item -Recurse -Force $Out -ErrorAction SilentlyContinue
 
 $kb = [math]::Round((Get-Item $Apk).Length / 1KB)
 Write-Host ""
-Write-Host "XONG: YTStatus.apk ($kb KB)" -ForegroundColor Green
+Write-Host "XONG: DiscordMobileStatus.apk ($kb KB)" -ForegroundColor Green
 Write-Host "  Gui file nay vao dien thoai (Zalo, Drive, cap USB...) roi bam de cai."

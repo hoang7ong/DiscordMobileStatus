@@ -23,7 +23,13 @@ import java.util.concurrent.Executors;
 final class Sender {
     interface Done { void result(boolean ok, String artUrl); }
 
-    private static final ExecutorService EX = Executors.newSingleThreadExecutor();
+    /** Một luồng nền duy nhất, ưu tiên thấp: nén ảnh + gửi mạng đều chạy ở đây, không chạm luồng giao diện. */
+    private static final ExecutorService EX = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "dms-send");
+        t.setPriority(Thread.MIN_PRIORITY);
+        t.setDaemon(true);
+        return t;
+    });
 
     static volatile String lastStatus = null;   // null = chưa gửi gì
     static volatile String lastTrack = "";
@@ -55,8 +61,8 @@ final class Sender {
     /** art != null -> gửi kèm ảnh bìa; callback trả URL ảnh (để lần sau dùng lại, khỏi gửi ảnh nữa). */
     static void sendTrack(Context ctx, Snap s, Bitmap art, String knownArtUrl, Done done) {
         final Context c = ctx.getApplicationContext();
-        final byte[] jpeg = art == null ? null : jpeg(art);
         EX.execute(() -> {
+            final byte[] jpeg = art == null ? null : jpeg(art);     // nén trên luồng nền
             String artUrl = knownArtUrl;
             String err = null;
             try {
@@ -84,6 +90,72 @@ final class Sender {
             lastStatus = err == null ? Prefs.t(c, "Đã gửi lúc ", "Sent at ") + clock() : err + " (" + clock() + ")";
             if (done != null) done.result(err == null, artUrl);
         });
+    }
+
+    // ---------------------------------------------------------------- game
+    static volatile String lastGameStatus = null;
+
+    /** Đang chơi game: {"v":2,"k":"game","pkg":..,"n":tên,"st":lúc bắt đầu,"icon":link}. Icon gửi kèm như ảnh bìa. */
+    static void sendGame(Context ctx, String pkg, String name, long startMs, Bitmap icon, String knownIconUrl, Done done) {
+        final Context c = ctx.getApplicationContext();
+        EX.execute(() -> {
+            final byte[] png = icon == null ? null : png(icon);
+            if (icon != null) icon.recycle();                       // icon do mình vẽ ra -> giải phóng ngay
+            String iconUrl = knownIconUrl;
+            String err = null;
+            try {
+                JSONObject j = new JSONObject();
+                j.put("v", 2);
+                j.put("k", "game");
+                j.put("pkg", pkg);
+                j.put("n", name);
+                j.put("st", startMs);
+                j.put("ts", System.currentTimeMillis());
+                if (iconUrl != null) j.put("icon", iconUrl);
+                if (png != null) {
+                    try {
+                        String url = topicUrl(c) + "?message=" + URLEncoder.encode(j.toString(), "UTF-8");
+                        JSONObject r = request(url, "PUT", png, "image/png", "icon.png");
+                        JSONObject att = r.optJSONObject("attachment");
+                        if (att != null) iconUrl = att.optString("url", null);
+                    } catch (HttpError e) {
+                        if (e.code == 429) throw e;
+                        post(c, j.toString());
+                    }
+                } else {
+                    post(c, j.toString());
+                }
+            } catch (HttpError e) {
+                err = e.code == 429 ? Prefs.t(c, "ntfy.sh báo hết lượt hôm nay (250 tin/ngày).", "ntfy.sh daily limit reached (250/day).")
+                        : Prefs.t(c, "Lỗi HTTP ", "HTTP error ") + e.code;
+            } catch (Exception e) {
+                err = Prefs.t(c, "Lỗi mạng: ", "Network error: ") + e.getMessage();
+            }
+            lastGameStatus = err == null ? Prefs.t(c, "Đã gửi lúc ", "Sent at ") + clock() : err + " (" + clock() + ")";
+            if (done != null) done.result(err == null, iconUrl);
+        });
+    }
+
+    static void sendGameStop(Context ctx) {
+        final Context c = ctx.getApplicationContext();
+        EX.execute(() -> {
+            try {
+                post(c, "{\"v\":2,\"k\":\"game\",\"stop\":true}");
+                lastGameStatus = Prefs.t(c, "Đã ẩn lúc ", "Hidden at ") + clock();
+            } catch (Exception e) {
+                lastGameStatus = Prefs.t(c, "Lỗi mạng lúc ", "Network error at ") + clock() + ": " + e.getMessage();
+            }
+        });
+    }
+
+    private static byte[] png(Bitmap bm) {
+        try {
+            ByteArrayOutputStream o = new ByteArrayOutputStream();
+            bm.compress(Bitmap.CompressFormat.PNG, 100, o);
+            return o.toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     static void sendStop(Context ctx) {

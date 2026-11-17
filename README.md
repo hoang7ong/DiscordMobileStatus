@@ -1,72 +1,76 @@
-# YT Status
+# Discord Mobile Status
 
 **Tiếng Việt** · [English](README.en.md)
 
-Hiện bạn đang nghe / xem gì trên **YouTube** và **YouTube Music** lên trạng thái Discord, giống ô Spotify:
+*(Tên cũ: YT Status)*
+
+Hiện bạn đang **nghe / xem / chơi** gì lên trạng thái Discord, giống ô Spotify:
 
 ```
-ĐANG NGHE YOUTUBE MUSIC                 ĐANG XEM YOUTUBE
-[ảnh bìa]  Tên bài                      [ảnh]  Tên video
-           Ca sĩ                               Tên kênh
-           ━━━━━━━○──── 1:23 / 4:08            ━━━━○────── 3:10 / 12:45
+ĐANG NGHE YOUTUBE MUSIC          ĐANG CHƠI
+[ảnh bìa]  Tên bài               [icon]  Liên Quân Mobile
+           Ca sĩ                         Trên điện thoại
+           ━━━━━○──── 1:23 / 4:08         ⏱ 23:14 đã trôi qua
 ```
 
-Nhận bài từ 2 nơi:
+Nhận từ:
 
-- **Trình duyệt trên máy tính** (Chrome, Edge, Cốc Cốc, Brave…): chỉ cần `YTStatus.exe`.
-- **Điện thoại Android** (app YouTube, YouTube Music): cài thêm `YTStatus.apk`.
+- **YouTube / YouTube Music trên trình duyệt máy tính** (Chrome, Edge, Cốc Cốc, Brave…): chỉ cần `DiscordMobileStatus.exe`.
+- **YouTube / YouTube Music trên điện thoại Android**: cài thêm `DiscordMobileStatus.apk`.
+- **Game trên điện thoại Android** (Liên Quân Mobile, Liên Minh Tốc Chiến, PUBG Mobile, Free Fire…): hiện tên game, icon và thời gian đã chơi. App **không** đọc tướng, rank, tỉ số hay bất cứ dữ liệu nào trong game.
+
+Nhạc và game hiện **cùng lúc** được (vừa nghe nhạc vừa chơi game).
 
 Discord chỉ cho đặt trạng thái kiểu này qua app Discord trên máy tính, nên trạng thái hiện khi PC đang bật và mở Discord (app desktop, không phải bản web).
 
-Tải `YTStatus.exe` và `YTStatus.apk` ở mục **Releases** bên phải.
+Tải `DiscordMobileStatus.exe` và `DiscordMobileStatus.apk` ở mục **Releases** bên phải.
+
+Cả hai app có nút **Tiếng Việt / English**. Lần đầu mở sẽ theo ngôn ngữ của Windows / điện thoại.
 
 ---
 
-## 1. Tạo ứng dụng Discord (1 lần, 2 phút)
+## 1. DiscordMobileStatus.exe (máy tính)
 
-Trạng thái ghi **tên ứng dụng** ("Đang nghe **YouTube Music**"), nên mỗi người tự tạo một ứng dụng mang tên đó:
+Không cần tạo ứng dụng Discord hay bật Developer Mode — app đã có sẵn các ứng dụng "YouTube Music", "YouTube" và "Game trên điện thoại".
 
-1. Vào https://discord.com/developers/applications → **New Application** → đặt tên `YouTube Music` → Create.
-2. Copy dãy số **Application ID** ở trang General Information.
-3. Tùy chọn: tạo thêm ứng dụng tên `YouTube` để lúc xem video ghi "Đang xem **YouTube**".
-4. Tùy chọn — biểu tượng nhỏ góc ảnh bìa: trong ứng dụng › **Rich Presence › Art Assets** → thêm ảnh [`pc/anh_cho_discord/ytmusic.png`](pc/anh_cho_discord/ytmusic.png), đặt tên `ytmusic` (ứng dụng YouTube: `youtube.png`, tên `youtube`).
-
-Không cần Bot, không cần token.
-
-## 2. YTStatus.exe (máy tính)
-
-1. Tải `YTStatus.exe`, để ở đâu cũng được (không cần cài), bấm đúp để chạy.
+1. Tải `DiscordMobileStatus.exe`, để ở đâu cũng được (không cần cài), bấm đúp để chạy.
    Windows báo "Windows protected your PC" thì bấm **More info › Run anyway** (file không có chữ ký số).
-2. Dán **Client ID** vào ô "YouTube Music" (và ô "YouTube" nếu có), bấm **Lưu**.
-3. Tick **Chạy cùng Windows** nếu muốn bật máy là tự chạy.
-4. Bấm **Thử Discord**: trạng thái hiện một bài mẫu trong 20 giây.
+2. Mở Discord trên máy tính, phát một bài YouTube trên trình duyệt — xong.
+3. Bấm **Thử Discord** để xem trước: trạng thái hiện một bài mẫu trong 20 giây.
 
-Mở YouTube trên trình duyệt phát một bài là trạng thái Discord đổi theo.
+Cửa sổ chia thành các khối, mỗi mục là một công tắc:
+
+| Khối | Công tắc |
+|---|---|
+| **Chia sẻ** | **Chia sẻ lên Discord** — tắt là ẩn hết, các công tắc con thu lại. Bật mới hiện: YouTube Music, YouTube, Game trên điện thoại, Vẫn hiện khi tạm dừng |
+| **Nguồn** | **Trình duyệt trên máy này**; **Điện thoại Android** — bật mới hiện ô nhập mã điện thoại |
+| **Ứng dụng** | **Chạy cùng Windows** (tự chạy ẩn dưới khay) |
 
 | Thao tác | Kết quả |
 |---|---|
 | Bấm **X** | Ẩn xuống khay hệ thống, app vẫn chạy |
 | Bấm biểu tượng ở khay | Mở lại cửa sổ |
-| Chuột phải biểu tượng › **Thoát** | Tắt hẳn |
-| Tick **Tắt hiện lên Discord** | App vẫn chạy nhưng không hiện gì |
-| Bỏ tick **Chia sẻ YouTube Music** / **Chia sẻ YouTube** | Tạm không hiện loại đó (cũng có trong menu chuột phải ở khay) |
-| Ô **Tiếng Việt / English** (góc trên) | Đổi ngôn ngữ ngay |
+| Chuột phải biểu tượng | Bật/tắt nhanh từng loại, **Thoát** để tắt hẳn |
+| Nút **Tiếng Việt / English** (góc trên) | Đổi ngôn ngữ ngay |
 
-Cấu hình lưu ở `YTStatus.json` cạnh file exe. Muốn bỏ: bỏ tick "Chạy cùng Windows", Thoát, xóa file.
+Cấu hình lưu ở `DiscordMobileStatus.json` cạnh file exe. Đang dùng bản cũ thì cấu hình được tự chuyển sang.
 
-## 3. YTStatus.apk (điện thoại Android — tùy chọn)
+## 2. DiscordMobileStatus.apk (điện thoại Android — tùy chọn)
 
-1. Cài `YTStatus.apk`. Ở Việt Nam, **Google Play Protect sẽ chặn** vì app cần quyền đọc thông báo (để biết bài đang phát). Cách cài:
+1. Cài `DiscordMobileStatus.apk` (cài đè lên YT Status cũ được, mã giữ nguyên). Ở Việt Nam, **Google Play Protect sẽ chặn** vì app cần quyền đọc thông báo. Cách cài:
    - Mở **Play Store** › ảnh đại diện › **Play Protect** › ⚙ › tắt **Quét ứng dụng bằng Play Protect** → cài APK → **bật lại** ngay.
-2. Mở app → bật quyền **Truy cập thông báo** cho YT Status.
-   Công tắc bị mờ (Android 13+): Cài đặt › Ứng dụng › YT Status › dấu **⋮** › **Cho phép cài đặt bị hạn chế**, rồi bật lại.
-3. Bấm **Không tối ưu pin** (Xiaomi / Oppo / Samsung bật thêm "Tự khởi chạy").
-4. Nút **English / Tiếng Việt** góc trên đổi ngôn ngữ app.
-5. Chép **Mã** trong app (dạng `nc-xxxx-xxxx-xxxx`) dán vào ô **Mã điện thoại** trong YTStatus.exe, bấm Lưu.
+2. Mở app → bật quyền **Truy cập thông báo** (để biết bài đang phát).
+   Công tắc bị mờ (Android 13+): Cài đặt › Ứng dụng › Discord Mobile Status › dấu **⋮** › **Cho phép cài đặt bị hạn chế**, rồi bật lại.
+3. Muốn chia sẻ game: bấm **Mở cài đặt truy cập dữ liệu sử dụng** → bật cho Discord Mobile Status. Quyền này giống Digital Wellbeing — chỉ biết app nào đang mở.
+4. Bấm **Không tối ưu pin** (Xiaomi / Oppo / Samsung bật thêm "Tự khởi chạy").
+5. Khối **Chia sẻ** › bật **Game** › **Chọn game được chia sẻ…**: game tự nhận diện được bật sẵn; tick thêm app khác nếu muốn, bỏ tick game không muốn ai thấy. App không phải game thì không bao giờ bị chia sẻ nếu bạn không tick.
+6. Trên máy tính, khối **Nguồn** › bật **Điện thoại Android**, dán **Mã** trong app (dạng `nc-xxxx-xxxx-xxxx`), bấm Lưu.
 
-Điện thoại gửi bài qua [ntfy.sh](https://ntfy.sh) (miễn phí, 250 tin/ngày — app chỉ gửi khi đổi bài / tạm dừng / tua nên đủ dùng cả ngày). Đừng đăng mã của bạn công khai.
+Điện thoại gửi qua [ntfy.sh](https://ntfy.sh) (miễn phí, 250 tin/ngày). App chỉ gửi khi đổi bài / tạm dừng / tua / vào hoặc thoát game, nên đủ dùng cả ngày. Đừng đăng mã của bạn công khai.
 
-Đang phát cả trên PC lẫn điện thoại thì trạng thái hiện bài trên PC.
+Pin: game chỉ được kiểm tra 15 giây một lần **khi màn hình bật**; tắt màn hình thì ngừng hẳn. Thoát game ra chat hay xem video chưa tới 2 phút thì vẫn tính là đang chơi.
+
+Nghe nhạc trên cả PC lẫn điện thoại cùng lúc thì hiện bài trên PC.
 
 ---
 
@@ -74,15 +78,16 @@ Cấu hình lưu ở `YTStatus.json` cạnh file exe. Muốn bỏ: bỏ tick "Ch
 
 | Hiện tượng | Cách xử lý |
 |---|---|
-| Discord không hiện gì | Xem các dòng trạng thái trong cửa sổ YTStatus. Kiểm tra: đã bỏ tick "Tắt hiện lên Discord"; đang mở Discord **app desktop**; Discord › Cài đặt › Quyền riêng tư hoạt động › bật "Hiển thị hoạt động hiện tại" |
+| Discord không hiện gì | Xem các dòng trạng thái trong cửa sổ. Kiểm tra: đã bật "Chia sẻ lên Discord"; đang mở Discord **app desktop**; Discord › Cài đặt › Quyền riêng tư hoạt động › bật "Hiển thị hoạt động hiện tại" |
+| Có nhạc nhưng game không hiện (hoặc ngược lại) | Báo lại cho người chia sẻ app kèm file `DiscordMobileStatus.log` |
 | Dòng "Máy tính" báo "không phải tab YouTube" | Đang phát nhạc ở app khác (Spotify…) — app chỉ nhận YouTube |
 | Điện thoại khóa màn hình một lúc thì ngừng | Tắt tối ưu pin + bật tự khởi chạy cho app |
-| Lỗi khác | Gửi file `YTStatus.log` (cạnh exe) cho người chia sẻ app |
+| Lỗi khác | Gửi file `DiscordMobileStatus.log` (cạnh exe) cho người chia sẻ app |
 
 ---
 
 ## Tự build từ mã nguồn
 
-- `BUILD_EXE.bat` — build YTStatus.exe bằng trình biên dịch có sẵn trong Windows (vài giây).
-- `BUILD_APK.bat` — build YTStatus.apk (lần đầu tải JDK + công cụ Android ~600 MB). Tự tạo khóa ký mới ở `android/khoa_ky/` nếu chưa có.
+- `BUILD_EXE.bat` — build DiscordMobileStatus.exe bằng trình biên dịch có sẵn trong Windows (vài giây).
+- `BUILD_APK.bat` — build DiscordMobileStatus.apk (lần đầu tải JDK + công cụ Android ~600 MB).
 - `CAI_QUA_USB.bat` — cài APK qua cáp USB (không bị Play Protect chặn).

@@ -47,6 +47,7 @@ public class NowListener extends NotificationListenerService
     private String artFor = null, artUrl = null;
     private long artAt = 0;
 
+    private GameWatcher games;
     private final Runnable flush = this::evaluate;
     private final Runnable heartbeat = () -> { lastSig = null; evaluate(); };
 
@@ -64,6 +65,8 @@ public class NowListener extends NotificationListenerService
             Sender.lastStatus = Prefs.t(this, "Chưa có quyền truy cập thông báo.", "Notification access not granted.");
         }
         Prefs.sp(this).registerOnSharedPreferenceChangeListener(this);
+        games = new GameWatcher(this);
+        games.start();
     }
 
     @Override public void onListenerDisconnected() {
@@ -71,6 +74,7 @@ public class NowListener extends NotificationListenerService
         if (instance == this) instance = null;
         try { if (msm != null) msm.removeOnActiveSessionsChangedListener(this); } catch (Exception ignored) {}
         Prefs.sp(this).unregisterOnSharedPreferenceChangeListener(this);
+        if (games != null) games.stop();
         unwatchAll();
         h.removeCallbacksAndMessages(null);
         super.onListenerDisconnected();
@@ -81,6 +85,7 @@ public class NowListener extends NotificationListenerService
         NowListener s = instance;
         if (s == null) return false;
         s.h.post(() -> { s.lastSig = null; s.artFor = null; s.evaluate(); });
+        if (s.games != null) s.games.resend();
         return true;
     }
 
@@ -89,6 +94,7 @@ public class NowListener extends NotificationListenerService
             lastSig = null;
             schedule();
         }
+        if (games != null && ("enabled".equals(key) || "games".equals(key) || "game_off".equals(key) || "game_extra".equals(key))) games.poke();
     }
 
     // ------------------------------------------------------------- theo dõi phiên

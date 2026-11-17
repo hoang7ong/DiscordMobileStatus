@@ -4,10 +4,14 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- biet game nao dang mo (nguoi dung tu bat trong Cai dat > Truy cap du lieu su dung) -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <!-- Android 11+: duoc thay danh sach app de chon game -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
 
     <application
-        android:label="YT Status"
+        android:label="Discord Mobile Status"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
@@ -25,7 +29,7 @@
 
         <service
             android:name=".NowListener"
-            android:label="YT Status"
+            android:label="Discord Mobile Status"
             android:exported="true"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
@@ -35,7 +39,7 @@
 
         <service
             android:name=".ToggleTile"
-            android:label="YT Status"
+            android:label="Discord Mobile Status"
             android:icon="@drawable/ic_tile"
             android:exported="true"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">

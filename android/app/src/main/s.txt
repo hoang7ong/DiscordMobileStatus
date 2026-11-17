@@ -1,0 +1,7 @@
+./java/app/ytstatus/Games.java
+./java/app/ytstatus/GameWatcher.java
+./java/app/ytstatus/MainActivity.java
+./java/app/ytstatus/NowListener.java
+./java/app/ytstatus/Prefs.java
+./java/app/ytstatus/Sender.java
+./java/app/ytstatus/ToggleTile.java

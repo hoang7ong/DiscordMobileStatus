@@ -12,8 +12,12 @@ final class Prefs {
 
     private Prefs() {}
 
+    private static volatile SharedPreferences cached;
+
     static SharedPreferences sp(Context c) {
-        return c.getApplicationContext().getSharedPreferences("ytstatus", Context.MODE_PRIVATE);
+        SharedPreferences s = cached;
+        if (s == null) cached = s = c.getApplicationContext().getSharedPreferences("ytstatus", Context.MODE_PRIVATE);
+        return s;
     }
 
     /** Mã kênh, tự tạo lần đầu. Ai biết mã này thì thấy bài bạn nghe — đừng đăng công khai. */
@@ -65,6 +69,7 @@ final class Prefs {
     /** Chữ theo ngôn ngữ đang chọn. */
     static String t(Context c, String vi, String english) { return en(c) ? english : vi; }
     static boolean youtube(Context c) { return sp(c).getBoolean("youtube", true); }
+    static boolean games(Context c) { return sp(c).getBoolean("games", true); }
     static boolean ytmusic(Context c) { return sp(c).getBoolean("ytmusic", true); }
 
     static void put(Context c, String key, String v) { sp(c).edit().putString(key, v).apply(); }
