@@ -28,6 +28,10 @@ final class GameWatcher {
     private static final long ICON_KEEP_MS = 150 * 60 * 1000;  // ntfy giữ ảnh 3 giờ
 
     static volatile String current = "";      // tên game đang chia sẻ (cho màn hình chính)
+    /** Bộ dò đang làm gì: "run" đang theo dõi, "perm" chờ quyền, "off" đã tắt, "" chưa chạy. */
+    static volatile String state = "";
+    private static GameWatcher instance;
+    private static final long PERM_RECHECK_MS = 30000;   // chưa có quyền: 30 giây xem lại 1 lần (chỉ khi màn hình bật)
 
     private final Context c;
     private final Handler h = new Handler(Looper.getMainLooper());
@@ -35,7 +39,7 @@ final class GameWatcher {
     private boolean started, screenOn = true;
 
     private long lastQuery;          // mốc thời gian đã đọc sự kiện tới
-    private String fg;               // app đang ở trước mặt
+    private String fg, fgClass;      // app (và màn hình của app) đang ở trước mặt
     private long fgSince;
     private String gamePkg, gameName;
     private long gameStart, leftAt, lastBeat, lastEnd;
@@ -46,11 +50,29 @@ final class GameWatcher {
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
-            if (!wanted()) { end(); return; }               // đang tắt -> không lên lịch lần sau
+            if (!Prefs.enabled(c) || !Prefs.games(c) || usm == null) {   // người dùng tắt -> dừng hẳn, không lên lịch
+                state = "off";
+                end();
+                return;
+            }
+            if (!Games.hasUsageAccess(c)) {
+                // chưa cấp quyền: xem lại thưa thớt để cấp xong là tự chạy (không cần tắt/bật màn hình)
+                state = "perm";
+                end();
+                if (screenOn && started) h.postDelayed(this, PERM_RECHECK_MS);
+                return;
+            }
+            state = "run";
             poll();
             if (screenOn && started) h.postDelayed(this, POLL_MS);
         }
     };
+
+    /** Màn hình chính gọi khi mở lại app (vd. vừa cấp quyền xong) -> kiểm tra ngay. */
+    static void wake() {
+        GameWatcher w = instance;
+        if (w != null) w.poke();
+    }
 
     /** Có cần theo dõi game không (bật chia sẻ + bật Game + đã cấp quyền). */
     private boolean wanted() {
@@ -71,7 +93,7 @@ final class GameWatcher {
             } else if (Intent.ACTION_SCREEN_ON.equals(i.getAction())) {
                 screenOn = true;
                 h.removeCallbacks(tick);
-                if (wanted()) h.post(tick);
+                if (Prefs.enabled(c) && Prefs.games(c)) h.post(tick);
             }
         }
     };
@@ -79,6 +101,7 @@ final class GameWatcher {
     void start() {
         if (started) return;
         started = true;
+        instance = this;
         usm = (UsageStatsManager) c.getSystemService(Context.USAGE_STATS_SERVICE);
         PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
         screenOn = pm == null || pm.isInteractive();
@@ -92,6 +115,8 @@ final class GameWatcher {
     void stop() {
         if (!started) return;
         started = false;
+        if (instance == this) instance = null;
+        state = "";
         try { c.unregisterReceiver(screen); } catch (Exception ignored) {}
         h.removeCallbacksAndMessages(null);
         end();
@@ -119,11 +144,15 @@ final class GameWatcher {
             while (ev != null && ev.hasNextEvent()) {
                 ev.getNextEvent(e);
                 int t = e.getEventType();
+                String pkg = e.getPackageName();
                 if (t == 1) {                                  // ACTIVITY_RESUMED (= MOVE_TO_FOREGROUND)
-                    if (!e.getPackageName().equals(fg)) fgSince = e.getTimeStamp();
-                    fg = e.getPackageName();
-                } else if (t == 2 && e.getPackageName().equals(fg)) {   // ACTIVITY_PAUSED
-                    fg = null;
+                    if (!pkg.equals(fg)) fgSince = e.getTimeStamp();
+                    fg = pkg;
+                    fgClass = e.getClassName();
+                } else if (t == 2 && pkg.equals(fg)) {         // ACTIVITY_PAUSED
+                    // chỉ coi là rời app khi đúng màn hình đang ở trước mặt bị tạm dừng
+                    String cls = e.getClassName();
+                    if (fgClass == null || cls == null || cls.equals(fgClass)) { fg = null; fgClass = null; }
                 }
             }
         } catch (Exception ignored) {}

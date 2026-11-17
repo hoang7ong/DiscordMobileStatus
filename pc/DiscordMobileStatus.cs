@@ -24,8 +24,8 @@ using System.Threading.Tasks;
 [assembly: System.Reflection.AssemblyTitle("Discord Mobile Status")]
 [assembly: System.Reflection.AssemblyProduct("Discord Mobile Status")]
 [assembly: System.Reflection.AssemblyDescription("Shows what you listen to, watch and play (YouTube, YouTube Music, mobile games) as your Discord status")]
-[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.2.0")]
 
 namespace DiscordMobileStatus
 {
@@ -2284,7 +2284,7 @@ namespace DiscordMobileStatus
             L.En = cfg.Lang == "en";
             AutoStart.Refresh();
             allowShow = !startHidden;
-            Log.W("Khởi động Discord Mobile Status 1.1.1, cấu hình: " + Config.FilePath);
+            Log.W("Khởi động Discord Mobile Status 1.1.2, cấu hình: " + Config.FilePath);
 
             BuildUi();
             ApplyLang();

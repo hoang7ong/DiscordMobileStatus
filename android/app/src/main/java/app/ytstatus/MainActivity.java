@@ -196,7 +196,8 @@ public class MainActivity extends Activity {
         if (listenerAllowed() && !NowListener.connected && Build.VERSION.SDK_INT >= 24) {
             try { NotificationListenerService.requestRebind(new ComponentName(this, NowListener.class)); } catch (Exception ignored) {}
         }
-        refresh(true);
+        refresh(true);                  // kiểm tra quyền ngay (vừa cấp xong trong Cài đặt)
+        GameWatcher.wake();             // ...và cho bộ dò game chạy luôn
         h.postDelayed(tick, 1500);
     }
 
@@ -222,11 +223,17 @@ public class MainActivity extends Activity {
         set(nowText, t == null || t.isEmpty() ? tr("Không phát gì", "Nothing playing") : t, TEXT);
         set(statusText, Sender.lastStatus == null ? tr("Chưa gửi gì.", "Nothing sent yet.") : Sender.lastStatus, MUTED);
         String g = GameWatcher.current;
+        String st = GameWatcher.state;
         String gl;
+        boolean playing = g != null && !g.isEmpty();
         if (!Prefs.games(this) || !Prefs.enabled(this)) gl = tr("Game: đang tắt", "Games: off");
-        else if (!ua) gl = tr("Game: chưa cấp quyền", "Games: no permission");
-        else gl = g == null || g.isEmpty() ? tr("Game: không chơi", "Games: not playing") : tr("Đang chơi: ", "Playing: ") + g;
-        set(gameText, gl, g != null && !g.isEmpty() ? GREEN : MUTED);
+        else if (!ua) gl = tr("Game: chưa cấp quyền xem game đang mở", "Games: usage access not granted");
+        else if (!listenerAllowed() || "".equals(st)) gl = tr("Game: chưa chạy — cần quyền truy cập thông báo", "Games: not running — needs notification access");
+        else if (playing) gl = tr("Đang chơi: ", "Playing: ") + g;
+        else gl = tr("Game: đang theo dõi, chưa thấy game", "Games: watching, no game open");
+        String gs = Sender.lastGameStatus;
+        if (playing && gs != null) gl += "\n" + gs;          // "Đã gửi lúc …" hoặc lỗi mạng / hết lượt
+        set(gameText, gl, playing ? GREEN : MUTED);
     }
 
     /** Chỉ đổi chữ / màu khi khác (tránh đo + vẽ lại thừa). */
