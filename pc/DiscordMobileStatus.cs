@@ -2219,28 +2219,177 @@ namespace DiscordMobileStatus
         }
     }
 
-    /// <summary>Panel cuộn không tự nhảy tới control vừa được focus.</summary>
-    class StillPanel : Panel
+    /// <summary>
+    /// Thanh cuộn mảnh kiểu Once UI: chỉ là một viên bo tròn nhỏ màu tối trên nền đen,
+    /// to ra một chút khi rê chuột, kéo được, bấm vào rãnh để nhảy trang. Nội dung vừa khung thì ẩn hẳn.
+    /// </summary>
+    class ThinBar : Smooth
     {
-        public StillPanel()
+        public Scroller Owner;
+        bool hover, drag;
+        int dragOff;
+
+        public ThinBar() { Cursor = Cursors.Default; BackColor = Ui.Page; }
+
+        Rectangle Thumb()
+        {
+            int view = Owner.Height, content = Owner.ContentHeight;
+            if (content <= view || view <= 0) return Rectangle.Empty;
+            int pad = Ui.D(4);
+            int track = Height - 2 * pad;
+            int th = Math.Max(Ui.D(32), track * view / content);
+            int range = content - view;
+            int ty = pad + (int)((long)(track - th) * Owner.Value / Math.Max(1, range));
+            return new Rectangle(0, ty, Width, th);
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            Rectangle t = Thumb();
+            if (e.Button == MouseButtons.Left && !t.IsEmpty)
+            {
+                if (e.Y >= t.Top && e.Y < t.Bottom) { drag = true; dragOff = e.Y - t.Top; Capture = true; }
+                else Owner.ScrollBy((e.Y < t.Top ? -1 : 1) * Owner.Height * 9 / 10, true);     // bấm rãnh = nhảy gần 1 trang
+                Invalidate();
+            }
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            if (drag)
+            {
+                Rectangle t = Thumb();
+                int pad = Ui.D(4);
+                int track = Height - 2 * pad - t.Height;
+                if (track > 0) Owner.ScrollTo((int)((long)(e.Y - dragOff - pad) * (Owner.ContentHeight - Owner.Height) / track), false);
+            }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e) { drag = false; Capture = false; Invalidate(); base.OnMouseUp(e); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Rectangle t = Thumb();
+            if (t.IsEmpty) return;
+            Graphics g = e.Graphics;
+            Hq(g);
+            float w = (hover || drag) ? Ui.D(6) : Ui.D(4);
+            float x = (Width - w) / 2f;
+            Color c = drag ? Color.FromArgb(92, 97, 108) : hover ? Color.FromArgb(70, 74, 84) : Color.FromArgb(46, 49, 56);
+            using (GraphicsPath p = Ui.Round(new RectangleF(x, t.Y, w, t.Height), w / 2))
+            using (SolidBrush b = new SolidBrush(c)) g.FillPath(b, p);
+        }
+    }
+
+    /// <summary>
+    /// Khung cuộn tự làm (thay cho thanh cuộn Windows to thô): nội dung đặt trong Content, cuộn bằng cách
+    /// dời Content lên; lăn chuột có trượt mượt; thanh cuộn mảnh nằm trong rãnh hẹp bên phải.
+    /// </summary>
+    class Scroller : Panel
+    {
+        public readonly Panel Content = new Panel();
+        public readonly ThinBar Bar = new ThinBar();
+        public static readonly int Gutter = Ui.D(10);
+        int value, contentH, target, gen;
+
+        public Scroller()
         {
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+            BackColor = Ui.Page;
+            Content.BackColor = Ui.Page;
+            typeof(Control).GetProperty("DoubleBuffered", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(Content, true, null);
+            Bar.Owner = this;
+            Content.ControlAdded += delegate (object s, ControlEventArgs e) { Hook(e.Control); };
+            Controls.Add(Content);
+            Controls.Add(Bar);
         }
-        protected override Point ScrollToControl(Control activeControl) { return DisplayRectangle.Location; }
+
+        void Hook(Control c)
+        {
+            if (c.TabStop || c is TextBox) c.Enter += delegate { Reveal(c); };
+            foreach (Control k in c.Controls) Hook(k);
+            c.ControlAdded += delegate (object s, ControlEventArgs e) { Hook(e.Control); };
+        }
+
+        public int Value { get { return value; } }
+        public int ContentHeight { get { return contentH; } }
+        int Max { get { return Math.Max(0, contentH - Height); } }
+
+        public void SetContentHeight(int h)
+        {
+            contentH = h;
+            value = Math.Min(value, Max);
+            target = Math.Min(target, Max);
+            Place();
+        }
+
+        void Place()
+        {
+            Content.SetBounds(0, -value, Width - Gutter, Math.Max(contentH, Height));
+            Bar.SetBounds(Width - Gutter, 0, Gutter, Height);
+            Bar.Invalidate();
+        }
+
+        protected override void OnResize(EventArgs e) { base.OnResize(e); value = Math.Min(value, Max); target = Math.Min(target, Max); Place(); }
+
+        /// <summary>Tab tới một control khuất -> cuộn cho nó hiện ra.</summary>
+        public void Reveal(Control c)
+        {
+            int top = 0;
+            for (Control x = c; x != null && x != Content; x = x.Parent) top += x.Top;
+            int bottom = top + c.Height;
+            if (top < value) ScrollTo(top - Ui.D(12), true);
+            else if (bottom > value + Height) ScrollTo(bottom - Height + Ui.D(12), true);
+        }
+
+        public void ScrollBy(int delta, bool animate) { ScrollTo(target + delta, animate); }
+
+        public void ScrollTo(int v, bool animate)
+        {
+            target = Math.Max(0, Math.Min(Max, v));
+            int my = ++gen;
+            if (!animate || !Visible)
+            {
+                value = target;
+                Place();
+                return;
+            }
+            Ui.Animate(delegate
+            {
+                if (my != gen) return true;
+                int diff = target - value;
+                if (Math.Abs(diff) <= 1) { value = target; Place(); return true; }
+                value += (int)Math.Round(diff * 0.3);                    // trượt chậm dần về đích (~0,15 s)
+                Place();
+                return false;
+            });
+        }
+
+        /// <summary>Lăn chuột: delta 120 = một nấc ≈ 3 dòng.</summary>
+        public void Wheel(int delta)
+        {
+            int lines = Math.Max(1, SystemInformation.MouseWheelScrollLines);
+            ScrollBy(-delta * lines * Ui.D(18) / 120, true);
+        }
     }
 
     // ================================================================ cửa sổ + khay hệ thống
     class MainForm : Form, IMessageFilter
     {
-        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
 
         /// <summary>Lăn chuột ở bất cứ đâu trong cửa sổ đều cuộn danh sách (mặc định WinForms chỉ cuộn khi panel có focus).</summary>
         public bool PreFilterMessage(ref Message m)
         {
-            if (m.Msg != 0x020A || !Visible || scroller == null || m.HWnd == scroller.Handle) return false;
+            if (m.Msg != 0x020A || !Visible || scroller == null) return false;
             Control c = Control.FromHandle(m.HWnd);
-            if (c == null || c.FindForm() != this || c is TextBox) return false;
-            SendMessage(scroller.Handle, m.Msg, m.WParam, m.LParam);
+            if (c == null || c.FindForm() != this) return false;
+            int delta = (short)(((long)m.WParam >> 16) & 0xFFFF);
+            scroller.Wheel(delta);
             return true;
         }
 
@@ -2257,7 +2406,7 @@ namespace DiscordMobileStatus
         ToolStripMenuItem miOpen, miHide, miMusic, miVideo, miGame, miExit;
 
         // khung
-        StillPanel scroller;
+        Scroller scroller;
         Label lblTitle, lblSub;
         Segmented seg;
         Card cStatus, cShare, cPhone, cApp;
@@ -2348,11 +2497,10 @@ namespace DiscordMobileStatus
             DoubleBuffered = true;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
 
-            scroller = new StillPanel();
+            scroller = new Scroller();
             scroller.Dock = DockStyle.Fill;
-            scroller.AutoScroll = true;
-            scroller.BackColor = Ui.Page;
             Controls.Add(scroller);
+            Control.ControlCollection body = scroller.Content.Controls;
 
             int cw = W - 2 * M;
 
@@ -2361,14 +2509,15 @@ namespace DiscordMobileStatus
             lblTitle.Font = Ui.Title;
             lblTitle.ForeColor = Ui.Text;
             lblTitle.AutoSize = true;
-            lblTitle.Location = new Point(M, D(14));
-            scroller.Controls.Add(lblTitle);
+            lblTitle.Location = new Point(M, D(16));
+            body.Add(lblTitle);
 
             seg = new Segmented();
             seg.SetItems(new string[] { "Tiếng Việt", "English" });
             seg.Index = L.En ? 1 : 0;
             seg.Size = new Size(D(150), D(28));
-            seg.Location = new Point(W - M - D(150), D(18));
+            int titleH = lblTitle.PreferredHeight;
+            seg.Location = new Point(W - M - D(150), lblTitle.Top + (titleH - seg.Height) / 2);     // ngang hàng tiêu đề
             seg.Changed += delegate
             {
                 bool en = seg.Index == 1;
@@ -2380,22 +2529,22 @@ namespace DiscordMobileStatus
                 engine.Cfg = cfg.Copy();
                 engine.Relabel();
             };
-            scroller.Controls.Add(seg);
+            body.Add(seg);
 
             lblSub = new Label();
             lblSub.ForeColor = Ui.Muted;
             lblSub.Font = Ui.Small;
             lblSub.AutoSize = false;
             lblSub.Size = new Size(cw, D(18));
-            lblSub.Location = new Point(M + 1, lblTitle.Bottom + D(4));
-            scroller.Controls.Add(lblSub);
+            lblSub.Location = new Point(M + 1, Math.Max(lblTitle.Top + titleH, seg.Bottom) + D(10));   // cách tiêu đề + ô ngôn ngữ
+            body.Add(lblSub);
 
             // ---- khối Trạng thái
             cStatus = new Card();
             cStatus.Width = cw;
             rPhone = Row(cStatus); rPc = Row(cStatus); rGame = Row(cStatus); rDiscord = Row(cStatus); rNow = Row(cStatus);
             StackCard(cStatus, new Control[] { rPhone, rPc, rGame, rDiscord, rNow }, D(2));
-            scroller.Controls.Add(cStatus);
+            body.Add(cStatus);
 
             // ---- khối Chia sẻ: công tắc chính + các công tắc con thu gọn được
             cShare = new Card();
@@ -2409,7 +2558,7 @@ namespace DiscordMobileStatus
             cShare.Controls.Add(colShare);
             colShare.Location = new Point(P, 0);
             colShare.HeightChanging += delegate { Relayout(); };
-            scroller.Controls.Add(cShare);
+            body.Add(cShare);
 
             // ---- khối Nguồn: trình duyệt PC + điện thoại (bật mới hiện ô mã)
             cPhone = new Card();
@@ -2432,20 +2581,20 @@ namespace DiscordMobileStatus
             colPhone.Height = D(108);
             cPhone.Controls.Add(colPhone);
             colPhone.HeightChanging += delegate { Relayout(); };
-            scroller.Controls.Add(cPhone);
+            body.Add(cPhone);
 
             // ---- khối Ứng dụng
             cApp = new Card();
             cApp.Width = cw;
             swStartup = SRow(cApp);
             StackCard(cApp, new Control[] { swStartup }, 0);
-            scroller.Controls.Add(cApp);
+            body.Add(cApp);
 
             // ---- nút
             btnTest = new UiButton(); btnTest.Size = new Size((cw - D(10)) / 2, D(38));
             btnTray = new UiButton(); btnTray.Primary = true; btnTray.Size = new Size((cw - D(10)) / 2, D(38));
-            scroller.Controls.Add(btnTest);
-            scroller.Controls.Add(btnTray);
+            body.Add(btnTest);
+            body.Add(btnTray);
 
             // ---- sự kiện
             swShare.Toggled += delegate { colShare.SetOpen(swShare.Checked, true); SaveFlags(); };
@@ -2508,7 +2657,7 @@ namespace DiscordMobileStatus
             tray.MouseClick += delegate (object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ShowFromTray(); };
 
             int maxH = Screen.PrimaryScreen.WorkingArea.Height - D(80);
-            ClientSize = new Size(W + SystemInformation.VerticalScrollBarWidth, Math.Min(D(800), maxH));
+            ClientSize = new Size(W + Scroller.Gutter, Math.Min(D(800), maxH));
             ResumeLayout(false);
         }
 
@@ -2551,8 +2700,7 @@ namespace DiscordMobileStatus
         /// <summary>Xếp lại các khối theo chiều dọc (gọi khi một phần thu gọn / mở ra).</summary>
         void Relayout()
         {
-            scroller.SuspendLayout();
-            int off = scroller.AutoScrollPosition.Y;          // âm khi đã cuộn xuống
+            scroller.Content.SuspendLayout();
             int gap = D(12);
             // xếp lại các hàng trong khối (chiều cao hàng đổi theo ngôn ngữ)
             int yy = 0;
@@ -2560,14 +2708,14 @@ namespace DiscordMobileStatus
             if (!colShare.Animating) colShare.Height = colShare.Open ? colShare.Full() : 0;
             swStartup.Location = new Point(P, D(38));
             cApp.Height = swStartup.Bottom + D(10);
-            int y = lblSub.Bottom - off + D(12);
-            cStatus.Location = new Point(M, y + off); y += cStatus.Height + gap;
+            int y = lblSub.Bottom + D(14);
+            cStatus.Location = new Point(M, y); y += cStatus.Height + gap;
 
             // khối Chia sẻ (Height = 0 khi thu gọn; không dùng .Visible vì cửa sổ ẩn thì mọi con đều báo false)
             swShare.Location = new Point(P, D(38));
             colShare.Location = new Point(P, swShare.Bottom + D(2));
             cShare.Height = (colShare.Height > 0 ? colShare.Bottom : swShare.Bottom) + D(10);
-            cShare.Location = new Point(M, y + off); y += cShare.Height + gap;
+            cShare.Location = new Point(M, y); y += cShare.Height + gap;
 
             // khối Nguồn
             swPc.Location = new Point(P, D(38));
@@ -2575,15 +2723,15 @@ namespace DiscordMobileStatus
             swPhone.Location = new Point(P, lblPcHint.Bottom + D(6));
             colPhone.Location = new Point(P, swPhone.Bottom);
             cPhone.Height = (colPhone.Height > 0 ? colPhone.Bottom : swPhone.Bottom) + D(10);
-            cPhone.Location = new Point(M, y + off); y += cPhone.Height + gap;
+            cPhone.Location = new Point(M, y); y += cPhone.Height + gap;
 
-            cApp.Location = new Point(M, y + off); y += cApp.Height + D(16);
+            cApp.Location = new Point(M, y); y += cApp.Height + D(16);
 
-            btnTest.Location = new Point(M, y + off);
-            btnTray.Location = new Point(M + btnTest.Width + D(10), y + off);
+            btnTest.Location = new Point(M, y);
+            btnTray.Location = new Point(M + btnTest.Width + D(10), y);
             y += btnTest.Height + M;
-            scroller.AutoScrollMinSize = new Size(0, y);
-            scroller.ResumeLayout(true);
+            scroller.Content.ResumeLayout(true);
+            scroller.SetContentHeight(y);
         }
 
         /// <summary>Đặt toàn bộ chữ trên cửa sổ + menu khay theo ngôn ngữ đang chọn.</summary>
