@@ -599,7 +599,7 @@ namespace DiscordMobileStatus
     {
         public string Pkg = "", Name = "", Icon = "";
         public long StartMs, ReceivedMs;
-        public const long SilentMs = 25 * 60000;     // điện thoại nhắc mỗi 10 phút; im 25 phút -> coi như đã thoát
+        public const long SilentMs = 12 * 60000;     // điện thoại nhắc mỗi 5 phút; im 12 phút -> coi như đã thoát (lỡ mất tin "thoát")
 
         /// <summary>Tin game {"v":2,"k":"game",...}. Trả null + stop=true khi điện thoại báo thoát game.</summary>
         public static GameTrack Parse(Dictionary<string, object> d, string attachmentUrl, long serverTimeS, out bool stop)

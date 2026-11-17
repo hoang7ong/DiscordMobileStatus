@@ -68,7 +68,7 @@ Cấu hình lưu ở `DiscordMobileStatus.json` cạnh file exe. Đang dùng b�
 
 Điện thoại gửi qua [ntfy.sh](https://ntfy.sh) (miễn phí, 250 tin/ngày). App chỉ gửi khi đổi bài / tạm dừng / tua / vào hoặc thoát game, nên đủ dùng cả ngày. Đừng đăng mã của bạn công khai.
 
-Pin: game chỉ được kiểm tra 15 giây một lần **khi màn hình bật**; tắt màn hình thì ngừng hẳn. Thoát game ra chat hay xem video chưa tới 2 phút thì vẫn tính là đang chơi.
+Pin: game chỉ được kiểm tra 15 giây một lần **khi màn hình bật**; tắt màn hình thì ngừng hẳn. Rời game quá 30 giây (hoặc tắt màn hình) thì trạng thái game tự ẩn.
 
 Nghe nhạc trên cả PC lẫn điện thoại cùng lúc thì hiện bài trên PC.
 

@@ -23,8 +23,9 @@ import android.os.SystemClock;
  */
 final class GameWatcher {
     private static final long POLL_MS = 15000;
-    private static final long GRACE_MS = 2 * 60 * 1000;       // thoát ra chat / YouTube chưa tới 2 phút thì vẫn tính là đang chơi
-    private static final long HEARTBEAT_MS = 10 * 60 * 1000;
+    private static final long GRACE_MS = 30 * 1000;           // rời game quá 30 giây -> ẩn (ra trả lời tin nhắn nhanh thì vẫn giữ)
+    private static final long HEARTBEAT_MS = 5 * 60 * 1000;    // nhắc PC mỗi 5 phút (PC im 12 phút thì tự ẩn)
+    private static final long LEFT_POLL_MS = 10000;            // vừa rời game: kiểm tra dày hơn để ẩn đúng hạn
     private static final long ICON_KEEP_MS = 150 * 60 * 1000;  // ntfy giữ ảnh 3 giờ
 
     static volatile String current = "";      // tên game đang chia sẻ (cho màn hình chính)
@@ -40,6 +41,7 @@ final class GameWatcher {
 
     private long lastQuery;          // mốc thời gian đã đọc sự kiện tới
     private String fg, fgClass;      // app (và màn hình của app) đang ở trước mặt
+    private long pausedAt;           // lần cuối app trước mặt bị tạm dừng
     private long fgSince;
     private String gamePkg, gameName;
     private long gameStart, leftAt, lastBeat, lastEnd;
@@ -64,7 +66,7 @@ final class GameWatcher {
             }
             state = "run";
             poll();
-            if (screenOn && started) h.postDelayed(this, POLL_MS);
+            if (screenOn && started) h.postDelayed(this, leftAt != 0 ? LEFT_POLL_MS : POLL_MS);
         }
     };
 
@@ -79,17 +81,16 @@ final class GameWatcher {
         return Prefs.enabled(c) && Prefs.games(c) && usm != null && Games.hasUsageAccess(c);
     }
 
-    private final Runnable graceCheck = () -> {
-        if (gamePkg != null && leftAt != 0 && System.currentTimeMillis() - leftAt >= GRACE_MS) end();
-    };
 
     private final BroadcastReceiver screen = new BroadcastReceiver() {
         @Override public void onReceive(Context ctx, Intent i) {
             if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) {
                 screenOn = false;
                 h.removeCallbacks(tick);
-                if (gamePkg != null && leftAt == 0) leftAt = System.currentTimeMillis();
-                h.postDelayed(graceCheck, GRACE_MS + 1000);
+                // tắt màn hình = không còn chơi; ẩn ngay vì hẹn giờ của Android không chạy khi máy ngủ sâu
+                end();
+                fg = null;
+                fgClass = null;
             } else if (Intent.ACTION_SCREEN_ON.equals(i.getAction())) {
                 screenOn = true;
                 h.removeCallbacks(tick);
@@ -145,18 +146,25 @@ final class GameWatcher {
                 ev.getNextEvent(e);
                 int t = e.getEventType();
                 String pkg = e.getPackageName();
+                if (pkg == null) continue;
                 if (t == 1) {                                  // ACTIVITY_RESUMED (= MOVE_TO_FOREGROUND)
                     if (!pkg.equals(fg)) fgSince = e.getTimeStamp();
-                    fg = pkg;
+                    fg = pkg;                                  // app nào lên trước mặt sau cùng = app đang dùng
                     fgClass = e.getClassName();
-                } else if (t == 2 && pkg.equals(fg)) {         // ACTIVITY_PAUSED
-                    // chỉ coi là rời app khi đúng màn hình đang ở trước mặt bị tạm dừng
-                    String cls = e.getClassName();
-                    if (fgClass == null || cls == null || cls.equals(fgClass)) { fg = null; fgClass = null; }
+                    pausedAt = 0;                              // lên lại trước mặt -> bỏ dấu tạm dừng
+                } else if ((t == 2 || t == 23) && pkg.equals(fg)) {   // ACTIVITY_PAUSED / ACTIVITY_STOPPED
+                    pausedAt = e.getTimeStamp();               // ghi nhận; còn đang mở hay không do kiểm tra bên dưới
                 }
             }
         } catch (Exception ignored) {}
         lastQuery = now;
+
+        // Game đã bị tạm dừng (về màn hình chính, kéo thanh thông báo, mở app khác…) mà chưa thấy app nào khác lên:
+        // hỏi Android trong 5 giây gần nhất app nào được dùng sau cùng. Nếu không phải game -> coi như đã rời game.
+        if (fg != null && pausedAt >= fgSince && Games.shared(c, fg)) {
+            String last = lastUsed(now);
+            if (last == null || !last.equals(fg)) { fg = last; fgClass = null; fgSince = now; }
+        }
 
         if (fg != null && Games.shared(c, fg)) {
             if (gamePkg == null || !gamePkg.equals(fg)) {
@@ -174,6 +182,26 @@ final class GameWatcher {
             if (leftAt == 0) leftAt = now;
             else if (now - leftAt >= GRACE_MS) end();
         }
+    }
+
+    /** App được đưa lên trước mặt gần nhất trong 2 phút vừa qua (null nếu không rõ / màn hình chính). */
+    private String lastUsed(long now) {
+        String last = null;
+        try {
+            UsageEvents ev = usm.queryEvents(now - 2 * 60 * 1000, now);
+            UsageEvents.Event e = new UsageEvents.Event();
+            String cur = null;
+            while (ev != null && ev.hasNextEvent()) {
+                ev.getNextEvent(e);
+                int t = e.getEventType();
+                String pkg = e.getPackageName();
+                if (pkg == null) continue;
+                if (t == 1) cur = pkg;
+                else if ((t == 2 || t == 23) && pkg.equals(cur)) cur = null;
+            }
+            last = cur;
+        } catch (Exception ignored) {}
+        return last;
     }
 
     private void send(boolean newGame) {

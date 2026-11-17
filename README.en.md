@@ -68,7 +68,7 @@ Settings are saved in `DiscordMobileStatus.json` next to the exe. Settings from 
 
 The phone sends through [ntfy.sh](https://ntfy.sh) (free, 250 messages/day). It only sends on track change / pause / seek / game start or exit — enough for a full day. Don't share your code publicly.
 
-Battery: games are checked every 15 seconds **only while the screen is on**; with the screen off it stops completely. Leaving a game for chat or a video for less than 2 minutes still counts as playing.
+Battery: games are checked every 15 seconds **only while the screen is on**; with the screen off it stops completely. Leaving the game for more than 30 seconds (or turning the screen off) hides the game status.
 
 If music is playing on both the PC and the phone, the PC wins.
 
