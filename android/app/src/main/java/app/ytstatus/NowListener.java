@@ -90,11 +90,11 @@ public class NowListener extends NotificationListenerService
     }
 
     @Override public void onSharedPreferenceChanged(SharedPreferences sp, String key) {
-        if ("enabled".equals(key) || "youtube".equals(key) || "ytmusic".equals(key)) {
+        if ("enabled".equals(key) || "youtube".equals(key) || "ytmusic".equals(key) || "soundcloud".equals(key)) {
             lastSig = null;
             schedule();
         }
-        if (games != null && ("enabled".equals(key) || "games".equals(key) || "game_off".equals(key) || "game_extra".equals(key))) games.poke();
+        if (games != null && ("enabled".equals(key) || "games".equals(key) || "tiktok".equals(key) || "instagram".equals(key) || "game_off".equals(key) || "game_extra".equals(key))) games.poke();
     }
 
     // ------------------------------------------------------------- theo dõi phiên
@@ -102,7 +102,7 @@ public class NowListener extends NotificationListenerService
         unwatchAll();
         if (list != null) {
             for (MediaController mc : list) {
-                if (Prefs.appOf(mc.getPackageName()) == null) continue;   // chỉ YouTube / YT Music
+                if (Prefs.appOf(mc.getPackageName()) == null) continue;   // chỉ YouTube / YT Music / SoundCloud
                 final MediaController ctl = mc;
                 MediaController.Callback cb = new MediaController.Callback() {
                     @Override public void onMetadataChanged(MediaMetadata m) { schedule(); }

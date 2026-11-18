@@ -61,9 +61,25 @@ final class Games {
     static Set<String> off(Context c) { return new HashSet<>(Prefs.sp(c).getStringSet("game_off", new HashSet<String>())); }
     static Set<String> extra(Context c) { return new HashSet<>(Prefs.sp(c).getStringSet("game_extra", new HashSet<String>())); }
 
+    /** TikTok / Instagram (đang bật chia sẻ) -> "tiktok" / "instagram", còn lại null. */
+    static String social(Context c, String pkg) {
+        if (pkg == null) return null;
+        if (pkg.equals("com.ss.android.ugc.trill") || pkg.equals("com.zhiliaoapp.musically") || pkg.equals("com.ss.android.ugc.aweme")
+                || pkg.startsWith("com.zhiliaoapp.musically.")) return Prefs.tiktok(c) ? "tiktok" : null;
+        if (pkg.equals("com.instagram.android") || pkg.equals("com.instagram.lite")) return Prefs.instagram(c) ? "instagram" : null;
+        return null;
+    }
+
+    /** Có phải app mạng xã hội được theo dõi (bất kể bật hay tắt) — để không bao giờ bị coi là game. */
+    static boolean isSocialApp(String pkg) {
+        return pkg != null && (pkg.equals("com.ss.android.ugc.trill") || pkg.startsWith("com.zhiliaoapp.musically")
+                || pkg.equals("com.ss.android.ugc.aweme") || pkg.startsWith("com.instagram."));
+    }
+
     /** App này có được chia sẻ lên Discord không. */
     static boolean shared(Context c, String pkg) {
-        if (pkg == null || pkg.equals(c.getPackageName()) || Prefs.appOf(pkg) != null) return false;
+        if (pkg == null || pkg.equals(c.getPackageName()) || Prefs.appOf(pkg) != null || isSocialApp(pkg)) return false;
+        if (!Prefs.games(c)) return false;
         if (extra(c).contains(pkg)) return true;
         return isGame(c, pkg) && !off(c).contains(pkg);
     }
@@ -91,7 +107,7 @@ final class Games {
         Map<String, App> map = new HashMap<>();
         for (ResolveInfo ri : list) {
             String pkg = ri.activityInfo.packageName;
-            if (map.containsKey(pkg) || pkg.equals(c.getPackageName()) || Prefs.appOf(pkg) != null) continue;
+            if (map.containsKey(pkg) || pkg.equals(c.getPackageName()) || Prefs.appOf(pkg) != null || isSocialApp(pkg)) continue;
             App a = new App();
             a.pkg = pkg;
             a.label = ri.loadLabel(pm).toString();

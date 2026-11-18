@@ -148,6 +148,40 @@ final class Sender {
         });
     }
 
+    /** Đang lướt TikTok / Instagram trên điện thoại: {"v":2,"k":"social","app":"tiktok","st":..,"ts":..}. Không kèm ảnh. */
+    static void sendSocial(Context ctx, String app, long startMs) {
+        final Context c = ctx.getApplicationContext();
+        EX.execute(() -> {
+            try {
+                JSONObject j = new JSONObject();
+                j.put("v", 2);
+                j.put("k", "social");
+                j.put("app", app);
+                j.put("st", startMs);
+                j.put("ts", System.currentTimeMillis());
+                post(c, j.toString());
+                lastGameStatus = Prefs.t(c, "Đã gửi lúc ", "Sent at ") + clock();
+            } catch (HttpError e) {
+                lastGameStatus = (e.code == 429 ? Prefs.t(c, "ntfy.sh báo hết lượt hôm nay (250 tin/ngày).", "ntfy.sh daily limit reached (250/day).")
+                        : Prefs.t(c, "Lỗi HTTP ", "HTTP error ") + e.code) + " (" + clock() + ")";
+            } catch (Exception e) {
+                lastGameStatus = Prefs.t(c, "Lỗi mạng: ", "Network error: ") + e.getMessage() + " (" + clock() + ")";
+            }
+        });
+    }
+
+    static void sendSocialStop(Context ctx) {
+        final Context c = ctx.getApplicationContext();
+        EX.execute(() -> {
+            try {
+                post(c, "{\"v\":2,\"k\":\"social\",\"stop\":true}");
+                lastGameStatus = Prefs.t(c, "Đã ẩn lúc ", "Hidden at ") + clock();
+            } catch (Exception e) {
+                lastGameStatus = Prefs.t(c, "Lỗi mạng lúc ", "Network error at ") + clock() + ": " + e.getMessage();
+            }
+        });
+    }
+
     private static byte[] png(Bitmap bm) {
         try {
             ByteArrayOutputStream o = new ByteArrayOutputStream();

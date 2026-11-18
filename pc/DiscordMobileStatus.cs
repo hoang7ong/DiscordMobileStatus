@@ -24,8 +24,8 @@ using System.Threading.Tasks;
 [assembly: System.Reflection.AssemblyTitle("Discord Mobile Status")]
 [assembly: System.Reflection.AssemblyProduct("Discord Mobile Status")]
 [assembly: System.Reflection.AssemblyDescription("Shows what you listen to, watch and play (YouTube, YouTube Music, mobile games) as your Discord status")]
-[assembly: System.Reflection.AssemblyVersion("1.1.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.2.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.2.0.0")]
 
 namespace DiscordMobileStatus
 {
@@ -208,9 +208,18 @@ namespace DiscordMobileStatus
         public bool UsePc = true;            // đọc YouTube đang phát trên trình duyệt của chính máy này
         public bool ShareMusic = true;       // chia sẻ bài YouTube Music lên Discord
         public bool ShareVideo = true;       // chia sẻ video YouTube lên Discord
+        public bool ShareSoundCloud = true;  // chia sẻ bài SoundCloud
         public string ArtTopic = "";         // kênh ntfy riêng để tải ảnh bìa từ PC lên (Discord cần link ảnh công khai)
         public string Lang = "";             // "vi" hoặc "en"; trống = theo ngôn ngữ Windows
         public string IdGame = FixedGame;    // ứng dụng Discord chung cho game điện thoại
+        public const string FixedTikTok = "1572510619364491294";  // "TikTok"
+        public const string FixedInsta = "1572510673001386096";   // "Instagram"
+        public string IdTikTok = FixedTikTok;
+        public string IdInsta = FixedInsta;
+        public const string FixedSoundCloud = "1572512420155498536";   // "SoundCloud"
+        public string IdSoundCloud = FixedSoundCloud;
+        public bool ShareTikTok = false;     // mặc định TẮT (tránh lộ việc lướt mà không biết)
+        public bool ShareInsta = false;
         public bool UsePhone = true;         // nhận từ điện thoại (qua mã kênh)
         public Dictionary<string, string> GameIds = new Dictionary<string, string>();   // tên game / tên gói -> Client ID riêng
         public bool ShareGame = true;        // chia sẻ game đang chơi trên điện thoại
@@ -276,10 +285,13 @@ namespace DiscordMobileStatus
                 c.UsePc = U.Get(d, "trinh_duyet_pc") == null || U.Bool(d, "trinh_duyet_pc");
                 c.ShareMusic = U.Get(d, "chia_se_ytmusic") == null || U.Bool(d, "chia_se_ytmusic");
                 c.ShareVideo = U.Get(d, "chia_se_youtube") == null || U.Bool(d, "chia_se_youtube");
+                c.ShareSoundCloud = U.Get(d, "chia_se_soundcloud") == null || U.Bool(d, "chia_se_soundcloud");
                 c.ArtTopic = U.Str(d, "kenh_anh") ?? "";
                 c.Lang = U.Str(d, "ngon_ngu") ?? "";
                 c.UsePhone = U.Get(d, "dien_thoai") == null ? c.Channel.Length > 0 : U.Bool(d, "dien_thoai");
                 c.ShareGame = U.Get(d, "chia_se_game") == null || U.Bool(d, "chia_se_game");
+                c.ShareTikTok = U.Bool(d, "chia_se_tiktok");
+                c.ShareInsta = U.Bool(d, "chia_se_instagram");
                 Dictionary<string, object> gi = U.Get(d, "client_id_game_rieng") as Dictionary<string, object>;
                 if (gi != null)
                     foreach (KeyValuePair<string, object> kv in gi)
@@ -304,10 +316,13 @@ namespace DiscordMobileStatus
             d["trinh_duyet_pc"] = UsePc;
             d["chia_se_ytmusic"] = ShareMusic;
             d["chia_se_youtube"] = ShareVideo;
+            d["chia_se_soundcloud"] = ShareSoundCloud;
             d["kenh_anh"] = ArtTopic;
             d["ngon_ngu"] = Lang;
 
             d["chia_se_game"] = ShareGame;
+            d["chia_se_tiktok"] = ShareTikTok;
+            d["chia_se_instagram"] = ShareInsta;
             d["client_id_game_rieng"] = GameIds;
             File.WriteAllText(FilePath, U.Json.Serialize(d), new UTF8Encoding(false));
         }
@@ -323,10 +338,22 @@ namespace DiscordMobileStatus
         }
 
         /// <summary>Loại này (YouTube / YouTube Music) có đang bật chia sẻ không.</summary>
-        public bool Shares(Track t) { return t != null && (t.App == "youtube" ? ShareVideo : ShareMusic); }
+        public bool Shares(Track t)
+        {
+            if (t == null) return false;
+            if (t.App == "tiktok") return ShareTikTok;
+            if (t.App == "instagram") return ShareInsta;
+            if (t.App == "soundcloud") return ShareSoundCloud;
+            return t.App == "youtube" ? ShareVideo : ShareMusic;
+        }
+
+        /// <summary>TikTok / Instagram mỗi cái một ứng dụng Discord riêng -> hồ sơ ghi thẳng "Đang xem TikTok / Instagram".</summary>
+        public string SocialId(string app) { return app == "instagram" ? IdInsta : IdTikTok; }
 
         public string ClientIdFor(Track t)
         {
+            if (t != null && t.IsSocial) return SocialId(t.App);
+            if (t != null && t.App == "soundcloud") return IdSoundCloud;
             if (t != null && t.App == "youtube" && IdVideo.Length > 0) return IdVideo;
             return IdMusic.Length > 0 ? IdMusic : IdVideo;
         }
@@ -450,6 +477,18 @@ namespace DiscordMobileStatus
         public long DurationMs, StartMs, ReceivedMs;
         public bool Playing;
         public string Source = "phone";      // "phone" hoặc "pc"
+        public bool IsSocial { get { return App == "tiktok" || App == "instagram"; } }
+        public static string AppName(string app)
+        {
+            switch (app)
+            {
+                case "tiktok": return "TikTok";
+                case "instagram": return "Instagram";
+                case "youtube": return "YouTube";
+                case "soundcloud": return "SoundCloud";
+                default: return "YouTube Music";
+            }
+        }
 
         public const long EndGraceMs = 45000;          // hết bài mà không có bài mới -> ẩn
         public const long PauseKeepMs = 5 * 60000;     // (khi bật "vẫn hiện khi tạm dừng") quá 5 phút -> ẩn
@@ -469,7 +508,8 @@ namespace DiscordMobileStatus
             if (t.Title.Length == 0) throw new FormatException("thiếu tên bài");
             t.Artist = U.Clean(U.Get(d, "a"), 128);
             t.Album = U.Clean(U.Get(d, "al"), 128);
-            t.App = U.Str(d, "app") == "youtube" ? "youtube" : "ytmusic";
+            string ap = U.Str(d, "app");
+            t.App = ap == "youtube" ? "youtube" : ap == "soundcloud" ? "soundcloud" : "ytmusic";
             string id = U.Clean(U.Get(d, "id"), 11);
             t.MediaId = Regex.IsMatch(id, "^[A-Za-z0-9_-]{11}$") ? id : "";
             long maxMs = 48L * 3600 * 1000;
@@ -491,6 +531,7 @@ namespace DiscordMobileStatus
 
         public bool Expired(bool showPaused, long now)
         {
+            if (Source == "phone-social") return now - ReceivedMs > GameTrack.SilentMs;
             if (!Playing) return !showPaused || now - ReceivedMs > PauseKeepMs;
             if (DurationMs > 0) return now > StartMs + DurationMs + EndGraceMs;
             return now - ReceivedMs > LiveSilentMs;
@@ -544,21 +585,37 @@ namespace DiscordMobileStatus
         /// <summary>mode: "full" (đầy đủ), "plain" (bỏ trường mới), "playing" (đổi sang Đang chơi cho Discord rất cũ).</summary>
         public Dictionary<string, object> Activity(string mode)
         {
-            bool music = App != "youtube";
-            string appName = music ? "YouTube Music" : "YouTube";
+            bool music = App == "ytmusic" || App == "soundcloud";
+            string appName = AppName(App);
             string who = Artist.Length > 0 ? Artist : appName;
+            bool phoneSocial = Source == "phone-social";
             Dictionary<string, object> act = new Dictionary<string, object>();
             act["type"] = mode == "playing" ? 0 : (music ? 2 : 3);     // 2 = Đang nghe, 3 = Đang xem
-            act["details"] = U.Fit(Title);
-            act["state"] = Playing ? U.Fit(who) : U.Fit(L.T("Tạm dừng · ", "Paused · ") + who);
+            if (phoneSocial)
+            {
+                // ứng dụng Discord đã mang tên "TikTok" / "Instagram" -> chỉ cần ghi nơi xem
+                act["details"] = U.Fit(L.T("Lướt video ngắn", "Scrolling short videos"));
+                act["state"] = U.Fit(L.OnMobile());
+            }
+            else
+            {
+                act["details"] = U.Fit(Title);
+                act["state"] = Playing ? U.Fit(who) : U.Fit(L.T("Tạm dừng · ", "Paused · ") + who);
+            }
             Dictionary<string, object> assets = new Dictionary<string, object>();
-            assets["small_image"] = music ? "ytmusic" : "youtube";      // tên ảnh ở Developer Portal › Rich Presence › Art Assets
+            assets["small_image"] = App;                              // tên ảnh ở Developer Portal › Rich Presence › Art Assets
             assets["small_text"] = appName;
             string cover = Cover.Length > 0 ? Cover : ArtUrl;
             if (cover.Length > 0)
             {
                 assets["large_image"] = cover;
                 assets["large_text"] = U.Fit(Album.Length > 0 ? Album : Title);
+            }
+            else if (IsSocial)
+            {
+                assets["large_image"] = App;                          // ảnh "tiktok" / "instagram" ở Art Assets
+                assets["large_text"] = appName;
+                assets.Remove("small_image");
             }
             act["assets"] = assets;
             act["instance"] = false;
@@ -567,10 +624,25 @@ namespace DiscordMobileStatus
             {
                 Dictionary<string, object> ts = new Dictionary<string, object>();
                 ts["start"] = StartMs;
-                if (DurationMs > 0) ts["end"] = StartMs + DurationMs;
+                // TikTok / Instagram: video ngắn lặp lại -> chỉ đếm thời gian đã xem, không vẽ thanh tiến độ
+                if (DurationMs > 0 && !IsSocial) ts["end"] = StartMs + DurationMs;
                 act["timestamps"] = ts;
             }
             return act;
+        }
+
+        /// <summary>Tin "đang lướt TikTok / Instagram" từ điện thoại -> một "bài" đặc biệt chỉ có tên app + thời gian.</summary>
+        public static Track Social(string app, long startMs, long receivedMs)
+        {
+            Track t = new Track();
+            t.App = app;
+            t.Title = AppName(app);
+            t.Artist = "";
+            t.Playing = true;
+            t.StartMs = startMs;
+            t.ReceivedMs = receivedMs;
+            t.Source = "phone-social";
+            return t;
         }
 
         public string Signature()
@@ -677,7 +749,7 @@ namespace DiscordMobileStatus
 
         public class Info
         {
-            public string Title = "", Artist = "", Album = "", App = "youtube";
+            public string Title = "", Artist = "", Album = "", App = "youtube";      // App: youtube / ytmusic / tiktok / instagram
             public long DurationMs, PositionMs;
             public bool Playing;
             public byte[] Thumb;
@@ -702,7 +774,10 @@ namespace DiscordMobileStatus
                 GetWindowText(h, sb, sb.Capacity);
                 string t = sb.ToString();
                 if (t.IndexOf("- YouTube", StringComparison.OrdinalIgnoreCase) >= 0
-                    || t.IndexOf("YouTube Music", StringComparison.OrdinalIgnoreCase) >= 0) list.Add(t);
+                    || t.IndexOf("YouTube Music", StringComparison.OrdinalIgnoreCase) >= 0
+                    || t.IndexOf("TikTok", StringComparison.OrdinalIgnoreCase) >= 0
+                    || t.IndexOf("Instagram", StringComparison.OrdinalIgnoreCase) >= 0
+                    || t.IndexOf("SoundCloud", StringComparison.OrdinalIgnoreCase) >= 0) list.Add(t);
                 return true;
             }, IntPtr.Zero);
             return list;
@@ -744,8 +819,34 @@ namespace DiscordMobileStatus
             foreach (string n in NotBrowser) if (src.Contains(n)) return null;
             List<string> wins = WindowTitles();
             string app = null;
+            if (src.Contains("cinhimbnkkaeohfgghhklpknlkffjgod")) return "ytmusic";     // app YouTube Music cài từ Chrome
+            // tên bài đang nằm trong một cửa sổ YouTube -> chắc chắn là YouTube (kể cả khi tên video có chữ "TikTok")
+            bool yt = false;
+            if (title.Length > 0)
+                foreach (string w in wins)
+                    if (w.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) >= 0 && w.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0) { yt = true; break; }
+            // SoundCloud: tiêu đề tab "Tên bài | SoundCloud" (hoặc "Đang phát… tên bài")
+            if (IsBrowser(src) && !yt && title.Length > 0)
+                foreach (string w in wins)
+                    if (w.IndexOf("SoundCloud", StringComparison.OrdinalIgnoreCase) >= 0 && w.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) < 0
+                        && w.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0) return "soundcloud";
+            // TikTok / Instagram: tiêu đề cửa sổ trình duyệt chứa chữ TikTok / Instagram
+            if (IsBrowser(src) && !yt)
+            {
+                foreach (string w in wins)
+                {
+                    bool match = title.Length > 0 && w.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0;
+                    // TikTok / Instagram hay đặt tên phát = tên trang ("TikTok - Make Your Day", "Instagram") nên khớp cả kiểu đó
+                    bool pageName = title.StartsWith("TikTok", StringComparison.OrdinalIgnoreCase) || title.StartsWith("Instagram", StringComparison.OrdinalIgnoreCase);
+                    if (!match && !pageName) continue;
+                    if (w.IndexOf("TikTok", StringComparison.OrdinalIgnoreCase) >= 0 && w.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) < 0) { app = "tiktok"; break; }
+                    if (w.IndexOf("Instagram", StringComparison.OrdinalIgnoreCase) >= 0 && w.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) < 0) { app = "instagram"; break; }
+                }
+                if (app != null) return app;
+            }
             foreach (string w in wins)
             {
+                if (w.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) < 0) continue;     // chỉ cửa sổ YouTube
                 if (title.Length > 0 && w.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     app = w.IndexOf("YouTube Music", StringComparison.OrdinalIgnoreCase) >= 0 ? "ytmusic" : "youtube";
@@ -756,7 +857,9 @@ namespace DiscordMobileStatus
             if (app == null)
                 foreach (string w in wins)
                     if (w.IndexOf("YouTube Music", StringComparison.OrdinalIgnoreCase) >= 0) { app = "ytmusic"; break; }
-            if (app == null && wins.Count > 0 && IsBrowser(src)) app = "youtube";
+            if (app == null && IsBrowser(src))
+                foreach (string w in wins)
+                    if (w.IndexOf("- YouTube", StringComparison.OrdinalIgnoreCase) >= 0) { app = "youtube"; break; }
             lock (AppCache)
             {
                 if (app != null)
@@ -909,7 +1012,7 @@ namespace DiscordMobileStatus
                 string app = Classify(title, S(s, tSession, "SourceAppUserModelId"));
                 if (app == null)
                 {
-                    if (playing) note = L.T("Đang phát \"" + U.Clean(title, 40) + "\" nhưng không phải tab YouTube", "Playing \"" + U.Clean(title, 40) + "\" — not a YouTube tab");
+                    if (playing) note = L.T("Đang phát \"" + U.Clean(title, 40) + "\" — không phải app được hỗ trợ", "Playing \"" + U.Clean(title, 40) + "\" — not a supported app");
                     continue;
                 }
                 Info i = new Info();
@@ -1116,6 +1219,7 @@ namespace DiscordMobileStatus
         Track track;          // từ điện thoại
         Track pcTrack;        // từ trình duyệt trên PC
         GameTrack game;       // game đang chơi trên điện thoại
+        Track social;         // đang lướt TikTok / Instagram trên điện thoại
         bool replaying;       // đang đọc lại tin cũ lúc khởi động (bỏ qua tìm ảnh bìa)
         DiscordIpc rpc;
         // game hiện bằng một kết nối Discord RIÊNG (ứng dụng khác) -> hiện song song với bài nhạc
@@ -1241,8 +1345,10 @@ namespace DiscordMobileStatus
             {
                 Track pc = pcTrack != null && !pcTrack.Expired(c.ShowPaused, now) && (!onlyShared || c.Shares(pcTrack)) ? pcTrack : null;
                 Track ph = track != null && !track.Expired(c.ShowPaused, now) && (!onlyShared || c.Shares(track)) ? track : null;
+                Track so = social != null && !social.Expired(c.ShowPaused, now) && (!onlyShared || c.Shares(social)) ? social : null;
                 if (pc != null && pc.Playing) return pc;
                 if (ph != null && ph.Playing) return ph;
+                if (so != null) return so;
                 return pc ?? ph;
             }
         }
@@ -1286,14 +1392,14 @@ namespace DiscordMobileStatus
                             wake.Set();
                         }
                         string n2 = note;
-                        Status4(null, () => n2 ?? L.T("Không phát YouTube", "No YouTube playing"), null, null);
+                        Status4(null, () => n2 ?? L.T("Không phát gì", "Nothing playing"), null, null);
                         continue;
                     }
                     long now = U.NowMs();
                     long start = now - i.PositionMs;
                     bool same = old != null && old.Title == i.Title && old.Artist == i.Artist && old.App == i.App
                                 && old.Playing == i.Playing && old.DurationMs == i.DurationMs
-                                && (!i.Playing || Math.Abs(old.StartMs - start) < 5000);
+                                && (!i.Playing || old.IsSocial || Math.Abs(old.StartMs - start) < 5000);   // TikTok lặp video -> không đếm lại
                     if (same)
                     {
                         if (old.Playing) old.ReceivedMs = now;      // vẫn đang phát bài cũ
@@ -1315,7 +1421,7 @@ namespace DiscordMobileStatus
                     Log.W("Máy tính: " + t.Label() + (t.Playing ? "" : " [tạm dừng]"));
                     Status4(null, () => (t.Playing ? L.T("Đang phát: ", "Playing: ") : L.T("Tạm dừng: ", "Paused: ")) + t.Label(), null, null);
                     wake.Set();
-                    if (newSong)
+                    if (newSong && !t.IsSocial)
                     {
                         string url = CoverForPc(c, t);
                         if (url.Length > 0)
@@ -1354,7 +1460,7 @@ namespace DiscordMobileStatus
                     url = UploadArt(c, i.Thumb, i.ThumbType);
             }
             catch (Exception e) { Log.W("Tải ảnh bìa lỗi: " + e.GetBaseException().Message); }
-            if (url.Length == 0 && t.App == "ytmusic") { t.FindCover(); url = t.Cover; }
+            if (url.Length == 0 && (t.App == "ytmusic" || t.App == "soundcloud")) { t.FindCover(); url = t.Cover; }
             lock (artUrls)
             {
                 if (artUrls.Count > 300) artUrls.Clear();
@@ -1392,11 +1498,11 @@ namespace DiscordMobileStatus
             while (!stopping)
             {
                 Config c = Cfg;
-                if (myGen != gen) { myGen = gen; lastId = null; lock (trackLock) { track = null; game = null; } wake.Set(); }
+                if (myGen != gen) { myGen = gen; lastId = null; lock (trackLock) { track = null; game = null; social = null; } wake.Set(); }
                 if (!c.PhoneReady())
                 {
                     bool had;
-                    lock (trackLock) { had = track != null || game != null; track = null; game = null; }
+                    lock (trackLock) { had = track != null || game != null || social != null; track = null; game = null; social = null; }
                     if (had) wake.Set();
                     bool phoneOff = !c.UsePhone;
                     Status(() => phoneOff ? L.T("Đang tắt", "Off") : L.T("Chưa nhập mã điện thoại", "No phone code yet"), null, null);
@@ -1475,6 +1581,26 @@ namespace DiscordMobileStatus
             // ---- tin game (v2)
             Dictionary<string, object> body2 = null;
             try { body2 = U.Json.DeserializeObject(U.Str(ev, "message") ?? "") as Dictionary<string, object>; } catch (Exception) { }
+            if (body2 != null && U.ToLong(U.Get(body2, "v"), 0, 99) == 2 && U.Str(body2, "k") == "social")
+            {
+                Track so = null;
+                if (!U.Bool(body2, "stop"))
+                {
+                    string sapp = U.Str(body2, "app") == "instagram" ? "instagram" : "tiktok";
+                    long now0 = U.NowMs();
+                    long st0 = U.ToLong(U.Get(body2, "st"), 0, 100000000000000L);
+                    long ts0 = U.ToLong(U.Get(body2, "ts"), 0, 100000000000000L);
+                    long skew0 = (evTime > 0 && ts0 > 0 && Math.Abs(evTime * 1000 - ts0) > 10000) ? evTime * 1000 - ts0 : 0;
+                    st0 += skew0;
+                    if (st0 <= 0 || st0 > now0 + 60000 || now0 - st0 > 24L * 3600 * 1000) st0 = now0;
+                    so = Track.Social(sapp, st0, evTime > 0 ? Math.Min(now0, evTime * 1000) : now0);
+                }
+                if (myGen != gen) return id;
+                lock (trackLock) social = so;
+                Log.W("Điện thoại (mxh): " + (so == null ? "(thoát)" : so.App));
+                wake.Set();
+                return id;
+            }
             if (body2 != null && U.ToLong(U.Get(body2, "v"), 0, 99) == 2 && U.Str(body2, "k") == "game")
             {
                 GameTrack g;
@@ -1556,7 +1682,7 @@ namespace DiscordMobileStatus
             if (forceReapply) { forceReapply = false; shownSig = null; }
             Track tr = Pick();
             Track raw = tr == null ? Pick(false) : null;      // có bài nhưng loại đó đang tắt chia sẻ?
-            string offApp = raw == null ? null : (raw.App == "youtube" ? "YouTube" : "YouTube Music");
+            string offApp = raw == null ? null : Track.AppName(raw.App);
             long now = U.NowMs();
             if (now < demoUntil) tr = Track.Demo();
             else if (c.Hidden) tr = null;
@@ -1599,7 +1725,7 @@ namespace DiscordMobileStatus
                 string user = rpc.User;
                 Track shown = tr;
                 Status(null, () => L.T("Đã nối (", "Connected (") + user + ")",
-                       () => (shown.App == "youtube" ? L.T("Đang xem: ", "Watching: ") : L.T("Đang nghe: ", "Listening: ")) + shown.Label());
+                       () => (shown.App == "ytmusic" || shown.App == "soundcloud" ? L.T("Đang nghe: ", "Listening: ") : L.T("Đang xem: ", "Watching: ")) + shown.Label());
             }
             else
             {
@@ -2403,7 +2529,7 @@ namespace DiscordMobileStatus
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
 
         NotifyIcon tray;
-        ToolStripMenuItem miOpen, miHide, miMusic, miVideo, miGame, miExit;
+        ToolStripMenuItem miOpen, miHide, miMusic, miVideo, miSc, miGame, miTikTok, miInsta, miExit;
 
         // khung
         Scroller scroller;
@@ -2411,7 +2537,7 @@ namespace DiscordMobileStatus
         Segmented seg;
         Card cStatus, cShare, cPhone, cApp;
         StatusRow rPhone, rPc, rGame, rDiscord, rNow;
-        SwitchRow swShare, swMusic, swVideo, swGame, swPaused, swPc, swPhone, swStartup;
+        SwitchRow swShare, swMusic, swVideo, swSc, swGame, swTikTok, swInsta, swPaused, swPc, swPhone, swStartup;
         Collapse colShare, colPhone;
         Control[] shareItems;
         Label lblCode, lblCodeHint, lblPcHint;
@@ -2433,7 +2559,7 @@ namespace DiscordMobileStatus
             L.En = cfg.Lang == "en";
             AutoStart.Refresh();
             allowShow = !startHidden;
-            Log.W("Khởi động Discord Mobile Status 1.1.2, cấu hình: " + Config.FilePath);
+            Log.W("Khởi động Discord Mobile Status 1.2.0, cấu hình: " + Config.FilePath);
 
             BuildUi();
             ApplyLang();
@@ -2552,8 +2678,9 @@ namespace DiscordMobileStatus
             swShare = SRow(cShare);
             colShare = new Collapse();
             colShare.Width = cw - 2 * P;
-            swMusic = SRow(colShare); swVideo = SRow(colShare); swGame = SRow(colShare); swPaused = SRow(colShare);
-            shareItems = new Control[] { Sep(colShare), swMusic, swVideo, swGame, swPaused };
+            swMusic = SRow(colShare); swVideo = SRow(colShare); swSc = SRow(colShare); swGame = SRow(colShare);
+            swTikTok = SRow(colShare); swInsta = SRow(colShare); swPaused = SRow(colShare);
+            shareItems = new Control[] { Sep(colShare), swMusic, swVideo, swSc, swGame, swTikTok, swInsta, swPaused };
             Stack(colShare, shareItems, 0);
             cShare.Controls.Add(colShare);
             colShare.Location = new Point(P, 0);
@@ -2601,6 +2728,9 @@ namespace DiscordMobileStatus
             swMusic.Toggled += delegate { SaveFlags(); };
             swVideo.Toggled += delegate { SaveFlags(); };
             swGame.Toggled += delegate { SaveFlags(); };
+            swTikTok.Toggled += delegate { SaveFlags(); };
+            swSc.Toggled += delegate { SaveFlags(); };
+            swInsta.Toggled += delegate { SaveFlags(); };
             swPaused.Toggled += delegate { SaveFlags(); };
             swPc.Toggled += delegate { SaveFlags(); };
             swPhone.Toggled += delegate { colPhone.SetOpen(swPhone.Checked, true); SaveFlags(); };
@@ -2638,13 +2768,19 @@ namespace DiscordMobileStatus
             miMusic = new ToolStripMenuItem(); miMusic.Click += delegate { swMusic.Checked = !swMusic.Checked; SaveFlags(); };
             miVideo = new ToolStripMenuItem(); miVideo.Click += delegate { swVideo.Checked = !swVideo.Checked; SaveFlags(); };
             miGame = new ToolStripMenuItem(); miGame.Click += delegate { swGame.Checked = !swGame.Checked; SaveFlags(); };
+            miSc = new ToolStripMenuItem(); miSc.Click += delegate { swSc.Checked = !swSc.Checked; SaveFlags(); };
+            miTikTok = new ToolStripMenuItem(); miTikTok.Click += delegate { swTikTok.Checked = !swTikTok.Checked; SaveFlags(); };
+            miInsta = new ToolStripMenuItem(); miInsta.Click += delegate { swInsta.Checked = !swInsta.Checked; SaveFlags(); };
             miExit = new ToolStripMenuItem(); miExit.Click += delegate { ExitApp(); };
             menu.Items.Add(miOpen);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(miHide);
             menu.Items.Add(miMusic);
             menu.Items.Add(miVideo);
+            menu.Items.Add(miSc);
             menu.Items.Add(miGame);
+            menu.Items.Add(miTikTok);
+            menu.Items.Add(miInsta);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(miExit);
 
@@ -2737,7 +2873,7 @@ namespace DiscordMobileStatus
         /// <summary>Đặt toàn bộ chữ trên cửa sổ + menu khay theo ngôn ngữ đang chọn.</summary>
         void ApplyLang()
         {
-            lblSub.Text = L.T("YouTube, YouTube Music và game điện thoại → trạng thái Discord.", "YouTube, YouTube Music and phone games → your Discord status.");
+            lblSub.Text = L.T("YouTube, SoundCloud, TikTok, Instagram, game → trạng thái Discord.", "YouTube, SoundCloud, TikTok, Instagram, games → your Discord status.");
             cStatus.Caption = L.T("Trạng thái", "Status");
             cShare.Caption = L.T("Chia sẻ", "Sharing");
             cPhone.Caption = L.T("Nguồn", "Sources");
@@ -2751,6 +2887,9 @@ namespace DiscordMobileStatus
             swMusic.SetText("YouTube Music", L.T("Đang nghe…", "Listening to…"));
             swVideo.SetText("YouTube", L.T("Đang xem…", "Watching…"));
             swGame.SetText(L.T("Game trên điện thoại", "Phone games"), L.T("Đang chơi… (cần app trên điện thoại)", "Playing… (needs the phone app)"));
+            swSc.SetText("SoundCloud", L.T("Đang nghe… (trình duyệt + điện thoại)", "Listening to… (browser + phone)"));
+            swTikTok.SetText("TikTok", L.T("Đang xem… (trình duyệt + điện thoại)", "Watching… (browser + phone)"));
+            swInsta.SetText("Instagram", L.T("Reels trên trình duyệt; app điện thoại: mọi màn hình", "Reels in the browser; phone app: any screen"));
             swPaused.SetText(L.T("Vẫn hiện khi tạm dừng", "Show while paused"), null);
             swPc.SetText(L.T("Trình duyệt trên máy này", "This PC's browser"), L.T("YouTube / YouTube Music trong Chrome, Edge, Cốc Cốc…", "YouTube / YouTube Music in Chrome, Edge, Brave…"));
             lblPcHint.Text = PcMedia.Supported ? "" : L.T("Cần Windows 10 bản 1809 trở lên", "Needs Windows 10 1809 or newer");
@@ -2768,6 +2907,9 @@ namespace DiscordMobileStatus
             miMusic.Text = "YouTube Music";
             miVideo.Text = "YouTube";
             miGame.Text = L.T("Game trên điện thoại", "Phone games");
+            miTikTok.Text = "TikTok";
+            miSc.Text = "SoundCloud";
+            miInsta.Text = "Instagram";
             miExit.Text = L.T("Thoát", "Exit");
             foreach (Control c in new Control[] { cStatus, cShare, cPhone, cApp }) c.Invalidate();
             if (pending != null || pendingGame != null) PaintStatus();
@@ -2782,6 +2924,9 @@ namespace DiscordMobileStatus
             swMusic.Checked = cfg.ShareMusic;
             swVideo.Checked = cfg.ShareVideo;
             swGame.Checked = cfg.ShareGame;
+            swTikTok.Checked = cfg.ShareTikTok;
+            swSc.Checked = cfg.ShareSoundCloud;
+            swInsta.Checked = cfg.ShareInsta;
             swPaused.Checked = cfg.ShowPaused;
             swPc.Checked = cfg.UsePc && PcMedia.Supported;
             swPc.Enabled = PcMedia.Supported;
@@ -2801,7 +2946,10 @@ namespace DiscordMobileStatus
             miMusic.Checked = cfg.ShareMusic;
             miVideo.Checked = cfg.ShareVideo;
             miGame.Checked = cfg.ShareGame;
-            miMusic.Enabled = miVideo.Enabled = miGame.Enabled = !cfg.Hidden;
+            miTikTok.Checked = cfg.ShareTikTok;
+            miSc.Checked = cfg.ShareSoundCloud;
+            miInsta.Checked = cfg.ShareInsta;
+            miMusic.Enabled = miVideo.Enabled = miSc.Enabled = miGame.Enabled = miTikTok.Enabled = miInsta.Enabled = !cfg.Hidden;
         }
 
         /// <summary>Lưu mã điện thoại. Trả false nếu mã sai.</summary>
@@ -2830,6 +2978,9 @@ namespace DiscordMobileStatus
             cfg.ShareMusic = swMusic.Checked;
             cfg.ShareVideo = swVideo.Checked;
             cfg.ShareGame = swGame.Checked;
+            cfg.ShareTikTok = swTikTok.Checked;
+            cfg.ShareSoundCloud = swSc.Checked;
+            cfg.ShareInsta = swInsta.Checked;
             cfg.ShowPaused = swPaused.Checked;
             if (PcMedia.Supported) cfg.UsePc = swPc.Checked;
             cfg.UsePhone = swPhone.Checked;

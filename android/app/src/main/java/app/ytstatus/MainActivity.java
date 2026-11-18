@@ -119,6 +119,7 @@ public class MainActivity extends Activity {
         shareBody.addView(divider());
         toggle("YouTube Music", tr("Đang nghe…", "Listening to…"), "ytmusic", Prefs.ytmusic(this), shareBody);
         toggle("YouTube", tr("Đang xem…", "Watching…"), "youtube", Prefs.youtube(this), shareBody);
+        toggle("SoundCloud", tr("Đang nghe…", "Listening to…"), "soundcloud", Prefs.soundcloud(this), shareBody);
         Switch gsw = toggle(tr("Game", "Games"), tr("Đang chơi… (tên game + thời gian)", "Playing… (game name + time)"),
                 "games", Prefs.games(this), shareBody);
         gameBody = vbox();
@@ -131,6 +132,11 @@ public class MainActivity extends Activity {
             gameBody.setVisibility(on ? View.VISIBLE : View.GONE);
             refresh(true);
         });
+        shareBody.addView(divider());
+        toggle("TikTok", tr("Đang lướt TikTok (cần quyền xem app đang mở)", "Scrolling TikTok (needs usage access)"),
+                "tiktok", Prefs.tiktok(this), shareBody);
+        toggle("Instagram", tr("Hiện khi mở Instagram — kể cả lúc nhắn tin, không chỉ Reels", "Shows whenever Instagram is open — DMs too, not just Reels"),
+                "instagram", Prefs.instagram(this), shareBody);
         gameBody.setVisibility(Prefs.games(this) ? View.VISIBLE : View.GONE);
         share.addView(shareBody);
         shareBody.setVisibility(Prefs.enabled(this) ? View.VISIBLE : View.GONE);
@@ -226,11 +232,11 @@ public class MainActivity extends Activity {
         String st = GameWatcher.state;
         String gl;
         boolean playing = g != null && !g.isEmpty();
-        if (!Prefs.games(this) || !Prefs.enabled(this)) gl = tr("Game: đang tắt", "Games: off");
-        else if (!ua) gl = tr("Game: chưa cấp quyền xem game đang mở", "Games: usage access not granted");
-        else if (!listenerAllowed() || "".equals(st)) gl = tr("Game: chưa chạy — cần quyền truy cập thông báo", "Games: not running — needs notification access");
-        else if (playing) gl = tr("Đang chơi: ", "Playing: ") + g;
-        else gl = tr("Game: đang theo dõi, chưa thấy game", "Games: watching, no game open");
+        if (!Prefs.watchApps(this) || !Prefs.enabled(this)) gl = tr("Game / TikTok / Instagram: đang tắt", "Games / TikTok / Instagram: off");
+        else if (!ua) gl = tr("Game / TikTok / Instagram: chưa cấp quyền xem app đang mở", "Games / TikTok / Instagram: usage access not granted");
+        else if (!listenerAllowed() || "".equals(st)) gl = tr("Chưa chạy — cần quyền truy cập thông báo", "Not running — needs notification access");
+        else if (playing) gl = ("TikTok".equals(g) || "Instagram".equals(g) ? tr("Đang lướt: ", "Scrolling: ") : tr("Đang chơi: ", "Playing: ")) + g;
+        else gl = tr("Đang theo dõi, chưa mở game / TikTok / Instagram", "Watching, no game / TikTok / Instagram open");
         String gs = Sender.lastGameStatus;
         if (playing && gs != null) gl += "\n" + gs;          // "Đã gửi lúc …" hoặc lỗi mạng / hết lượt
         set(gameText, gl, playing ? GREEN : MUTED);

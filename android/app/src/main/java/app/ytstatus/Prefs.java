@@ -70,14 +70,20 @@ final class Prefs {
     static String t(Context c, String vi, String english) { return en(c) ? english : vi; }
     static boolean youtube(Context c) { return sp(c).getBoolean("youtube", true); }
     static boolean games(Context c) { return sp(c).getBoolean("games", true); }
+    static boolean tiktok(Context c) { return sp(c).getBoolean("tiktok", false); }
+    static boolean instagram(Context c) { return sp(c).getBoolean("instagram", false); }
+    /** Bộ dò app (game / TikTok / Instagram) có cần chạy không. */
+    static boolean watchApps(Context c) { return games(c) || tiktok(c) || instagram(c); }
     static boolean ytmusic(Context c) { return sp(c).getBoolean("ytmusic", true); }
+    static boolean soundcloud(Context c) { return sp(c).getBoolean("soundcloud", true); }
 
     static void put(Context c, String key, String v) { sp(c).edit().putString(key, v).apply(); }
     static void put(Context c, String key, boolean v) { sp(c).edit().putBoolean(key, v).apply(); }
 
-    /** Gói này là YouTube / YouTube Music (kể cả bản ReVanced)? Trả "youtube", "ytmusic" hoặc null. */
+    /** Gói này là YouTube / YouTube Music (kể cả bản ReVanced) / SoundCloud? Trả "youtube", "ytmusic", "soundcloud" hoặc null. */
     static String appOf(String pkg) {
         if (pkg == null) return null;
+        if (pkg.equals("com.soundcloud.android") || pkg.startsWith("com.soundcloud.android.")) return "soundcloud";
         if (pkg.equals("com.google.android.apps.youtube.music") || pkg.contains("youtube.music")
                 || pkg.endsWith(".music.revanced")) return "ytmusic";
         if (pkg.equals("com.google.android.youtube") || pkg.contains("revanced.android.youtube")
@@ -88,6 +94,7 @@ final class Prefs {
     static boolean wanted(Context c, String pkg) {
         String a = appOf(pkg);
         if (a == null) return false;
+        if (a.equals("soundcloud")) return soundcloud(c);
         return a.equals("ytmusic") ? ytmusic(c) : youtube(c);
     }
 }

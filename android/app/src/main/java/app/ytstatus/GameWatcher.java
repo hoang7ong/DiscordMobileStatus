@@ -44,6 +44,7 @@ final class GameWatcher {
     private long pausedAt;           // lần cuối app trước mặt bị tạm dừng
     private long fgSince;
     private String gamePkg, gameName;
+    private String gameKind;         // "game", "tiktok" hoặc "instagram"
     private long gameStart, leftAt, lastBeat, lastEnd;
     private String iconPkg, iconUrl;
     private long iconAt;
@@ -52,7 +53,7 @@ final class GameWatcher {
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
-            if (!Prefs.enabled(c) || !Prefs.games(c) || usm == null) {   // người dùng tắt -> dừng hẳn, không lên lịch
+            if (!Prefs.enabled(c) || !Prefs.watchApps(c) || usm == null) {   // người dùng tắt -> dừng hẳn, không lên lịch
                 state = "off";
                 end();
                 return;
@@ -78,7 +79,7 @@ final class GameWatcher {
 
     /** Có cần theo dõi game không (bật chia sẻ + bật Game + đã cấp quyền). */
     private boolean wanted() {
-        return Prefs.enabled(c) && Prefs.games(c) && usm != null && Games.hasUsageAccess(c);
+        return Prefs.enabled(c) && Prefs.watchApps(c) && usm != null && Games.hasUsageAccess(c);
     }
 
 
@@ -94,7 +95,7 @@ final class GameWatcher {
             } else if (Intent.ACTION_SCREEN_ON.equals(i.getAction())) {
                 screenOn = true;
                 h.removeCallbacks(tick);
-                if (Prefs.enabled(c) && Prefs.games(c)) h.post(tick);
+                if (Prefs.enabled(c) && Prefs.watchApps(c)) h.post(tick);
             }
         }
     };
@@ -161,16 +162,18 @@ final class GameWatcher {
 
         // Game đã bị tạm dừng (về màn hình chính, kéo thanh thông báo, mở app khác…) mà chưa thấy app nào khác lên:
         // hỏi Android trong 5 giây gần nhất app nào được dùng sau cùng. Nếu không phải game -> coi như đã rời game.
-        if (fg != null && pausedAt >= fgSince && Games.shared(c, fg)) {
+        if (fg != null && pausedAt >= fgSince && kindOf(fg) != null) {
             String last = lastUsed(now);
             if (last == null || !last.equals(fg)) { fg = last; fgClass = null; fgSince = now; }
         }
 
-        if (fg != null && Games.shared(c, fg)) {
-            if (gamePkg == null || !gamePkg.equals(fg)) {
-                if (gamePkg != null) end();                    // đổi thẳng sang game khác
+        String kind = fg == null ? null : kindOf(fg);
+        if (kind != null) {
+            if (gamePkg == null || !gamePkg.equals(fg) || !kind.equals(gameKind)) {
+                if (gamePkg != null) end();                    // đổi thẳng sang game / app khác
                 gamePkg = fg;
-                gameName = Games.label(c, fg);
+                gameKind = kind;
+                gameName = kind.equals("tiktok") ? "TikTok" : kind.equals("instagram") ? "Instagram" : Games.label(c, fg);
                 gameStart = fgSince > lastEnd && fgSince > 0 ? fgSince : now;
                 leftAt = 0;
                 send(true);
@@ -204,9 +207,20 @@ final class GameWatcher {
         return last;
     }
 
+    /** "game" / "tiktok" / "instagram" nếu app này đang được chia sẻ, còn lại null. */
+    private String kindOf(String pkg) {
+        String s = Games.social(c, pkg);
+        if (s != null) return s;
+        return Games.shared(c, pkg) ? "game" : null;
+    }
+
     private void send(boolean newGame) {
         lastBeat = System.currentTimeMillis();
         current = gameName;
+        if (!"game".equals(gameKind)) {                        // TikTok / Instagram: không cần icon, PC dùng ảnh có sẵn
+            Sender.sendSocial(c, gameKind, gameStart);
+            return;
+        }
         boolean haveIcon = gamePkg.equals(iconPkg) && iconUrl != null && SystemClock.elapsedRealtime() - iconAt < ICON_KEEP_MS;
         Bitmap icon = haveIcon ? null : iconOf(gamePkg);       // icon chỉ tải lên 1 lần cho mỗi game (dùng lại 2,5 giờ)
         final String pkg = gamePkg;
@@ -220,9 +234,13 @@ final class GameWatcher {
     }
 
     private void end() {
-        if (gamePkg != null) Sender.sendGameStop(c);
+        if (gamePkg != null) {
+            if ("game".equals(gameKind)) Sender.sendGameStop(c);
+            else Sender.sendSocialStop(c);
+        }
         gamePkg = null;
         gameName = null;
+        gameKind = null;
         leftAt = 0;
         lastEnd = System.currentTimeMillis();
         current = "";
