@@ -19,6 +19,7 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using System.Reflection;
+using System.Windows.Automation;
 using System.Threading.Tasks;
 
 [assembly: System.Reflection.AssemblyTitle("Discord Mobile Status")]
@@ -763,7 +764,101 @@ namespace DiscordMobileStatus
         [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder sb, int max);
         [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder sb, int max);
         delegate bool EnumProc(IntPtr h, IntPtr lp);
+
+        const string TabMark = "\u0001tab";     // đánh dấu tên lấy từ thanh tab (không phải tiêu đề cửa sổ)
+
+        /// <summary>Tên MỌI tab của các cửa sổ trình duyệt (kể cả tab đang bị che), đọc qua UI Automation của Windows.
+        /// Chỉ gọi khi không nhận ra trang bằng tiêu đề cửa sổ, vì tốn hơn.</summary>
+        static List<string> TabTitles()
+        {
+            List<IntPtr> hs = new List<IntPtr>();
+            EnumWindows(delegate (IntPtr h, IntPtr lp)
+            {
+                if (!IsWindowVisible(h)) return true;
+                StringBuilder cn = new StringBuilder(64);
+                GetClassName(h, cn, cn.Capacity);
+                string c = cn.ToString();
+                if (c != "Chrome_WidgetWin_1" && c != "MozillaWindowClass") return true;      // Chrome, Edge, Cốc Cốc, Brave, Opera / Firefox
+                int n = GetWindowTextLength(h);
+                if (n <= 0 || n > 1000) return true;
+                StringBuilder sb = new StringBuilder(n + 1);
+                GetWindowText(h, sb, sb.Capacity);
+                if (IsBrowserWindow(Norm(sb.ToString()))) hs.Add(h);                        // bỏ Discord, VS Code… (cũng là Chrome_WidgetWin_1)
+                return true;
+            }, IntPtr.Zero);
+            List<string> list = new List<string>();
+            if (hs.Count == 0) return list;
+            lock (TabLock)
+            {
+                if (tabBusy) return list;          // lần đọc trước còn treo (trình duyệt bận) -> bỏ qua
+                tabBusy = true;
+            }
+            List<string> found = new List<string>();
+            Thread th = new Thread(delegate ()
+            {
+                try
+                {
+                    foreach (IntPtr h in hs) ReadTabs(h, found);
+                }
+                catch (Exception) { }
+                finally { lock (TabLock) tabBusy = false; }
+            });
+            th.IsBackground = true;
+            th.Priority = ThreadPriority.Lowest;
+            th.SetApartmentState(ApartmentState.MTA);
+            th.Start();
+            if (th.Join(2500)) list.AddRange(found);     // quá 2,5 giây thì thôi, không để luồng chính chờ
+            return list;
+        }
+
+        static readonly object TabLock = new object();
+        static bool tabBusy;
+
+        static void ReadTabs(IntPtr h, List<string> found)
+        {
+            CacheRequest cr = new CacheRequest();
+            cr.Add(AutomationElement.NameProperty);
+            cr.Add(AutomationElement.ControlTypeProperty);
+            using (cr.Activate())
+            {
+                AutomationElement root = AutomationElement.FromHandle(h);
+                // thanh tab đứng trước nội dung trang -> tìm nhanh; không quét cả trang (trang web cũng có "tab")
+                AutomationElement strip = root.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Tab));
+                if (strip != null)
+                {
+                    foreach (AutomationElement t in strip.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem)))
+                    {
+                        string n = t.Cached.Name;
+                        if (!string.IsNullOrEmpty(n) && found.Count < 300) found.Add(n + TabMark);
+                    }
+                    return;
+                }
+            }
+            int budget = 800;
+            WalkTabs(AutomationElement.FromHandle(h), 0, found, ref budget);     // tab dọc (Edge) / Firefox: đi tay
+        }
+
+        static void WalkTabs(AutomationElement e, int depth, List<string> list, ref int budget)
+        {
+            TreeWalker tw = TreeWalker.ControlViewWalker;
+            AutomationElement c = tw.GetFirstChild(e);
+            while (c != null && budget > 0)
+            {
+                budget--;
+                ControlType ct = c.Current.ControlType;
+                if (ct == ControlType.TabItem)
+                {
+                    string n = c.Current.Name;
+                    if (!string.IsNullOrEmpty(n) && list.Count < 300) list.Add(n + TabMark);
+                }
+                else if (ct != ControlType.Document && depth < 14) WalkTabs(c, depth + 1, list, ref budget);   // không đi vào nội dung trang web
+                c = tw.GetNextSibling(c);
+            }
+        }
+
+        static readonly Dictionary<string, DateTime> TabScanAt = new Dictionary<string, DateTime>();   // tên bài -> lần đọc thanh tab gần nhất
 
         static List<string> WindowTitles()
         {
@@ -815,7 +910,7 @@ namespace DiscordMobileStatus
         static string Norm(string s)
         {
             if (string.IsNullOrEmpty(s)) return "";
-            s = s.Replace("\uFE0F", "").Replace("▶", " ").Replace("▷", " ").Replace("⏸", " ");
+            s = s.Replace("\uFE0F", "").Replace("\u200B", "").Replace("▶", " ").Replace("▷", " ").Replace("⏸", " ");
             return Regex.Replace(s, @"\s+", " ").Trim().ToLowerInvariant();
         }
 
@@ -833,6 +928,7 @@ namespace DiscordMobileStatus
 
         static bool IsBrowserWindow(string normWin)
         {
+            if (normWin.EndsWith(TabMark, StringComparison.Ordinal)) return true;
             foreach (string b in BrowserTails) if (normWin.EndsWith(b, StringComparison.Ordinal)) return true;
             return false;
         }
@@ -903,19 +999,54 @@ namespace DiscordMobileStatus
             // tên bài đang nằm trong một cửa sổ YouTube -> chắc chắn là YouTube (kể cả khi tên video có chữ "TikTok")
             foreach (string w in wins)
                 if (Has(w, "youtube") && Match(w, probe)) { app = Has(w, "youtube music") ? "ytmusic" : "youtube"; sure = true; break; }
+            if (app == null && br)
+            {
+                app = SiteOf(nt, probe, artist, album, raw, wins);
+                if (app != null) sure = true;
+            }
+            bool known;
+            lock (AppCache) known = AppCache.ContainsKey(title);
+            if (app == null && br && playing && !known)
+            {
+                // tab đang phát bị tab khác che -> đọc tên mọi tab (tối đa 1 lần / phút cho mỗi bài)
+                bool due;
+                lock (TabScanAt)
+                {
+                    DateTime last;
+                    due = !TabScanAt.TryGetValue(title, out last) || (DateTime.UtcNow - last).TotalSeconds > 60;
+                    if (due)
+                    {
+                        if (TabScanAt.Count > 200) TabScanAt.Clear();
+                        TabScanAt[title] = DateTime.UtcNow;
+                    }
+                }
+                if (due)
+                {
+                    List<string> tr = new List<string>(), tw = new List<string>();
+                    foreach (string t in TabTitles())
+                    {
+                        string nw = Norm(t);
+                        if (Match(nw, probe)) { tr.Add(t); tw.Add(nw); }      // chỉ giữ tab có đúng tên bài
+                    }
+                    foreach (string w in tw)
+                        if (Has(w, "youtube")) { app = Has(w, "youtube music") ? "ytmusic" : "youtube"; sure = true; break; }
+                    if (app == null && tw.Count > 0)
+                    {
+                        app = SiteOf(nt, probe, artist, album, tr, tw);
+                        if (app != null) sure = true;
+                    }
+                    raw.AddRange(tr);
+                    wins.AddRange(tw);
+                }
+            }
             List<string> hit = null;
             lock (AppCache)
             {
-                if (app == null && br)
-                {
-                    app = SiteOf(nt, probe, artist, album, raw, wins);
-                    if (app != null) sure = true;
-                }
                 if (app == null) AppCache.TryGetValue(title, out app);     // tab bị che bởi tab khác -> nhớ lần nhận ra trước
                 if (app == null && br && playing)
                 {
                     hit = new List<string>();
-                    foreach (string w in wins) if (Match(w, probe)) hit.Add(U.Clean(w, 120));
+                    foreach (string w in wins) if (Match(w, probe)) hit.Add(U.Clean(w.Replace(TabMark, " [tab]"), 120));
                     // tab đang bị che và trình duyệt này vừa phát SoundCloud / YouTube… chưa tới 90 giây -> bài kế tiếp tự chạy của cùng trang
                     KeyValuePair<string, DateTime> m;
                     if (hit.Count == 0 && SiteMem.TryGetValue(src, out m) && (DateTime.UtcNow - m.Value).TotalSeconds < 90) app = m.Key;
@@ -1082,7 +1213,7 @@ namespace DiscordMobileStatus
                 string app = Classify(title, S(p, tProps, "Artist"), S(p, tProps, "AlbumTitle"), S(s, tSession, "SourceAppUserModelId"), playing);
                 if (app == null)
                 {
-                    if (playing) note = L.T("Đang phát \"" + U.Clean(title, 40) + "\" — chưa nhận ra trang (bấm sang tab đó một lần)", "Playing \"" + U.Clean(title, 40) + "\" — site not recognized (switch to that tab once)");
+                    if (playing) note = L.T("Đang phát \"" + U.Clean(title, 40) + "\" — chưa nhận ra trang", "Playing \"" + U.Clean(title, 40) + "\" — site not recognized");
                     continue;
                 }
                 Info i = new Info();

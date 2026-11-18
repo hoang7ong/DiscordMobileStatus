@@ -29,6 +29,7 @@ if defined WASRUN (
 "%CSC%" /nologo /target:winexe /optimize+ /platform:anycpu /codepage:65001 ^
   /win32icon:"pc\DiscordMobileStatus.ico" /out:"DiscordMobileStatus.exe" ^
   /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll ^
+  /lib:"%FW%\WPF" /r:UIAutomationClient.dll /r:UIAutomationTypes.dll /r:WindowsBase.dll ^
   "pc\DiscordMobileStatus.cs"
 if errorlevel 1 (
   echo.
