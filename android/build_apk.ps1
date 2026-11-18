@@ -12,8 +12,8 @@ $Sdk     = Join-Path $Tools "android-sdk"
 $BT_VER  = "34.0.0"
 $API     = "34"
 $MIN_SDK = "24"
-$VersionName = "1.2.0"
-$VersionCode = "10200"
+$VersionName = "1.2.1"
+$VersionCode = "10201"
 
 function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Yellow }
 function Fail($t) { Write-Host "[LOI] $t" -ForegroundColor Red; exit 1 }

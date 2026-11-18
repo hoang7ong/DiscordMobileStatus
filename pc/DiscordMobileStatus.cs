@@ -24,8 +24,8 @@ using System.Threading.Tasks;
 [assembly: System.Reflection.AssemblyTitle("Discord Mobile Status")]
 [assembly: System.Reflection.AssemblyProduct("Discord Mobile Status")]
 [assembly: System.Reflection.AssemblyDescription("Shows what you listen to, watch and play (YouTube, YouTube Music, mobile games) as your Discord status")]
-[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.2.1.0")]
 
 namespace DiscordMobileStatus
 {
@@ -492,6 +492,7 @@ namespace DiscordMobileStatus
 
         public const long EndGraceMs = 45000;          // hết bài mà không có bài mới -> ẩn
         public const long PauseKeepMs = 5 * 60000;     // (khi bật "vẫn hiện khi tạm dừng") quá 5 phút -> ẩn
+        public const long PcSilentMs = 30000;          // bài trên PC không được làm mới -> ẩn
         public const long LiveSilentMs = 25 * 60000;   // livestream: điện thoại nhắc mỗi 10 phút
 
         /// <summary>Tin từ điện thoại -> bài. Trả null kèm stop=true khi điện thoại báo dừng. Tin lạ -> FormatException.</summary>
@@ -532,6 +533,8 @@ namespace DiscordMobileStatus
         public bool Expired(bool showPaused, long now)
         {
             if (Source == "phone-social") return now - ReceivedMs > GameTrack.SilentMs;
+            // PC đọc lại mỗi 2–8 giây: quá 30 giây không thấy nữa (tắt tab, trình duyệt treo) -> ẩn, không chờ hết bài
+            if (Source == "pc" && Playing && now - ReceivedMs > PcSilentMs) return true;
             if (!Playing) return !showPaused || now - ReceivedMs > PauseKeepMs;
             if (DurationMs > 0) return now > StartMs + DurationMs + EndGraceMs;
             return now - ReceivedMs > LiveSilentMs;
@@ -772,12 +775,7 @@ namespace DiscordMobileStatus
                 if (n <= 0 || n > 1000) return true;
                 StringBuilder sb = new StringBuilder(n + 1);
                 GetWindowText(h, sb, sb.Capacity);
-                string t = sb.ToString();
-                if (t.IndexOf("- YouTube", StringComparison.OrdinalIgnoreCase) >= 0
-                    || t.IndexOf("YouTube Music", StringComparison.OrdinalIgnoreCase) >= 0
-                    || t.IndexOf("TikTok", StringComparison.OrdinalIgnoreCase) >= 0
-                    || t.IndexOf("Instagram", StringComparison.OrdinalIgnoreCase) >= 0
-                    || t.IndexOf("SoundCloud", StringComparison.OrdinalIgnoreCase) >= 0) list.Add(t);
+                list.Add(sb.ToString());       // lấy hết, lọc theo tên bài ở ClassifyNow (tab SoundCloud đang phát có tên "▶ Bài" không chữ SoundCloud)
                 return true;
             }, IntPtr.Zero);
             return list;
@@ -803,71 +801,143 @@ namespace DiscordMobileStatus
         static string lastApp;
         static DateTime lastScan = DateTime.MinValue;
 
-        static string Classify(string title, string sourceId)
+        static string Classify(string title, string artist, string album, string sourceId, bool playing)
         {
-            string key = title + "\n" + sourceId;
+            string key = title + "\n" + artist + "\n" + sourceId + "\n" + playing;
             if (key == lastKey && (DateTime.UtcNow - lastScan).TotalSeconds < (lastApp != null ? 10 : 4)) return lastApp;
             lastKey = key;
             lastScan = DateTime.UtcNow;
-            lastApp = ClassifyNow(title, sourceId);
+            lastApp = ClassifyNow(title, artist, album, sourceId, playing);
             return lastApp;
         }
 
-        static string ClassifyNow(string title, string sourceId)
+        /// <summary>Chữ thường, bỏ dấu ▶/▷ và khoảng trắng thừa — để so tên bài với tiêu đề cửa sổ.</summary>
+        static string Norm(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            s = s.Replace("\uFE0F", "").Replace("▶", " ").Replace("▷", " ").Replace("⏸", " ");
+            return Regex.Replace(s, @"\s+", " ").Trim().ToLowerInvariant();
+        }
+
+        static bool Has(string normText, string word) { return normText.IndexOf(word, StringComparison.Ordinal) >= 0; }
+
+        /// <summary>Cửa sổ có chứa tên bài? Tên ngắn (dưới 8 chữ) phải đứng đầu tiêu đề, tránh khớp nhầm kiểu "Intro".</summary>
+        static bool Match(string normWin, string probe)
+        {
+            if (probe.Length < 3) return false;
+            return probe.Length < 8 ? normWin.StartsWith(probe, StringComparison.Ordinal) : Has(normWin, probe);
+        }
+
+        // đuôi tiêu đề cửa sổ của trình duyệt
+        static readonly string[] BrowserTails = { "google chrome", "microsoft edge", "mozilla firefox", "opera", "brave", "cốc cốc", "coc coc", "vivaldi", "arc" };
+
+        static bool IsBrowserWindow(string normWin)
+        {
+            foreach (string b in BrowserTails) if (normWin.EndsWith(b, StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        static bool IsDomain(string s) { return Regex.IsMatch(s ?? "", @"^(www\.|m\.)?[a-z0-9-]+\.(com|net|org|vn)$", RegexOptions.IgnoreCase); }
+
+        // trang khác cũng thêm "▶" vào tên tab -> không coi là SoundCloud
+        static readonly string[] OtherPlayers = { "youtube", "spotify", "deezer", "bandcamp", "mixcloud", "netflix", "twitch", "tiktok", "instagram", "facebook", "zing", "nhaccuatui" };
+
+        static readonly HashSet<string> LoggedUnknown = new HashSet<string>();
+        static readonly Dictionary<string, KeyValuePair<string, DateTime>> SiteMem = new Dictionary<string, KeyValuePair<string, DateTime>>();   // trình duyệt -> trang vừa phát
+
+        /// <summary>SoundCloud / TikTok / Instagram nhận được chắc chắn từ thông tin bài hoặc tab đang mở; null = chưa biết.</summary>
+        static string SiteOf(string nt, string probe, string artist, string album, List<string> raw, List<string> wins)
+        {
+            // 1) chính thông tin bài đã mang tên trang (Chrome để tên trang / tên miền khi trang không tự khai báo)
+            string meta = Norm(artist) + " | " + Norm(album);
+            if (Has(meta, "soundcloud")) return "soundcloud";
+            if (Has(meta, "tiktok.com")) return "tiktok";
+            if (Has(meta, "instagram.com")) return "instagram";
+            // tên phát mang đuôi tên trang: chỉ tin khi không có kênh / nghệ sĩ (YouTube luôn có tên kênh)
+            string na = Norm(artist);
+            if (na.Length == 0 || IsDomain(na))
+            {
+                if (nt == "tiktok" || nt.StartsWith("tiktok - ") || nt.StartsWith("tiktok – ") || Regex.IsMatch(nt, @"[|•\-–]\s*tiktok$")) return "tiktok";
+                if (nt == "instagram" || Has(nt, " on instagram:") || Regex.IsMatch(nt, @"[|•\-–]\s*instagram( reels?)?$")) return "instagram";
+            }
+            // 2) cửa sổ trình duyệt đang mở đúng tab đó
+            for (int k = 0; k < wins.Count; k++)
+                {
+                    string w = wins[k];
+                    if (!Match(w, probe) || Has(w, "youtube")) continue;
+                    if (Has(w, "soundcloud")) return "soundcloud";
+                    if (Has(w, "tiktok")) return "tiktok";
+                    if (Has(w, "instagram")) return "instagram";
+                    // SoundCloud đổi tên tab thành "▶ Tên bài by Người đăng" khi đang phát
+                    if (raw[k].TrimStart().StartsWith("▶") && IsBrowserWindow(w))
+                    {
+                        bool other = false;
+                        foreach (string o in OtherPlayers) if (Has(w, o)) { other = true; break; }
+                        if (!other) return "soundcloud";
+                    }
+                }
+            // 3) tên phát đúng bằng tên trang ("TikTok - Make Your Day") -> cửa sổ trình duyệt đang mở trang đó là đủ
+            if (nt == "tiktok" || nt.StartsWith("tiktok - ") || nt == "instagram")
+            {
+                string site = nt.StartsWith("tiktok") ? "tiktok" : "instagram";
+                foreach (string w in wins) if (w.StartsWith(site, StringComparison.Ordinal) && IsBrowserWindow(w)) return site;
+            }
+            return null;
+        }
+
+        static string ClassifyNow(string title, string artist, string album, string sourceId, bool playing)
         {
             string src = (sourceId ?? "").ToLowerInvariant();
             foreach (string n in NotBrowser) if (src.Contains(n)) return null;
-            List<string> wins = WindowTitles();
-            string app = null;
             if (src.Contains("cinhimbnkkaeohfgghhklpknlkffjgod")) return "ytmusic";     // app YouTube Music cài từ Chrome
+            // Firefox báo mã dạng "308046B0AF4A39CB" thay vì tên
+            bool br = IsBrowser(src) || Regex.IsMatch(src, "^[0-9a-f]{16}$");
+            string nt = Norm(title);
+            if (nt.Length == 0) return null;
+            string probe = nt.Length > 40 ? nt.Substring(0, 40) : nt;     // tên tab dài có thể bị cắt
+            List<string> raw = WindowTitles();
+            List<string> wins = new List<string>(raw.Count);
+            foreach (string r in raw) wins.Add(Norm(r));
+            string app = null;
+            bool sure = false;       // nhận ra từ bằng chứng trực tiếp (tab đang mở / thông tin bài)
             // tên bài đang nằm trong một cửa sổ YouTube -> chắc chắn là YouTube (kể cả khi tên video có chữ "TikTok")
-            bool yt = false;
-            if (title.Length > 0)
-                foreach (string w in wins)
-                    if (w.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) >= 0 && w.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0) { yt = true; break; }
-            // SoundCloud: tiêu đề tab "Tên bài | SoundCloud" (hoặc "Đang phát… tên bài")
-            if (IsBrowser(src) && !yt && title.Length > 0)
-                foreach (string w in wins)
-                    if (w.IndexOf("SoundCloud", StringComparison.OrdinalIgnoreCase) >= 0 && w.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) < 0
-                        && w.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0) return "soundcloud";
-            // TikTok / Instagram: tiêu đề cửa sổ trình duyệt chứa chữ TikTok / Instagram
-            if (IsBrowser(src) && !yt)
-            {
-                foreach (string w in wins)
-                {
-                    bool match = title.Length > 0 && w.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0;
-                    // TikTok / Instagram hay đặt tên phát = tên trang ("TikTok - Make Your Day", "Instagram") nên khớp cả kiểu đó
-                    bool pageName = title.StartsWith("TikTok", StringComparison.OrdinalIgnoreCase) || title.StartsWith("Instagram", StringComparison.OrdinalIgnoreCase);
-                    if (!match && !pageName) continue;
-                    if (w.IndexOf("TikTok", StringComparison.OrdinalIgnoreCase) >= 0 && w.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) < 0) { app = "tiktok"; break; }
-                    if (w.IndexOf("Instagram", StringComparison.OrdinalIgnoreCase) >= 0 && w.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) < 0) { app = "instagram"; break; }
-                }
-                if (app != null) return app;
-            }
             foreach (string w in wins)
-            {
-                if (w.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) < 0) continue;     // chỉ cửa sổ YouTube
-                if (title.Length > 0 && w.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    app = w.IndexOf("YouTube Music", StringComparison.OrdinalIgnoreCase) >= 0 ? "ytmusic" : "youtube";
-                    break;
-                }
-            }
-            if (app == null && (sourceId ?? "").IndexOf("cinhimbnkkaeohfgghhklpknlkffjgod", StringComparison.OrdinalIgnoreCase) >= 0) app = "ytmusic";   // app YouTube Music cài từ Chrome
-            if (app == null)
-                foreach (string w in wins)
-                    if (w.IndexOf("YouTube Music", StringComparison.OrdinalIgnoreCase) >= 0) { app = "ytmusic"; break; }
-            if (app == null && IsBrowser(src))
-                foreach (string w in wins)
-                    if (w.IndexOf("- YouTube", StringComparison.OrdinalIgnoreCase) >= 0) { app = "youtube"; break; }
+                if (Has(w, "youtube") && Match(w, probe)) { app = Has(w, "youtube music") ? "ytmusic" : "youtube"; sure = true; break; }
+            List<string> hit = null;
             lock (AppCache)
             {
+                if (app == null && br)
+                {
+                    app = SiteOf(nt, probe, artist, album, raw, wins);
+                    if (app != null) sure = true;
+                }
+                if (app == null) AppCache.TryGetValue(title, out app);     // tab bị che bởi tab khác -> nhớ lần nhận ra trước
+                if (app == null && br && playing)
+                {
+                    hit = new List<string>();
+                    foreach (string w in wins) if (Match(w, probe)) hit.Add(U.Clean(w, 120));
+                    // tab đang bị che và trình duyệt này vừa phát SoundCloud / YouTube… chưa tới 90 giây -> bài kế tiếp tự chạy của cùng trang
+                    KeyValuePair<string, DateTime> m;
+                    if (hit.Count == 0 && SiteMem.TryGetValue(src, out m) && (DateTime.UtcNow - m.Value).TotalSeconds < 90) app = m.Key;
+                }
+                if (app == null)
+                    foreach (string w in wins)
+                        if (Has(w, "youtube music")) { app = "ytmusic"; break; }
+                if (app == null && br)
+                    foreach (string w in wins)
+                        if (Has(w, "- youtube")) { app = "youtube"; break; }
                 if (app != null)
                 {
                     if (AppCache.Count > 300) AppCache.Clear();
                     AppCache[title] = app;
+                    if (sure && playing) SiteMem[src] = new KeyValuePair<string, DateTime>(app, DateTime.UtcNow);
                 }
-                else AppCache.TryGetValue(title, out app);     // tab YouTube bị che -> nhớ lần trước
+                else if (br && LoggedUnknown.Count < 50 && LoggedUnknown.Add(title))
+                {
+                    // ghi lại để biết trang ghi tên tab ra sao (chỉ tên cửa sổ có chứa tên bài)
+                    Log.W("Không nhận ra trang của \"" + U.Clean(title, 80) + "\" (nghệ sĩ: " + U.Clean(artist, 60) + "; nguồn: " + U.Clean(src, 60)
+                          + "; cửa sổ khớp: " + (hit == null || hit.Count == 0 ? "không có — tab đang bị che" : string.Join(" ‖ ", hit.ToArray())) + ")");
+                }
             }
             return app;
         }
@@ -1009,17 +1079,21 @@ namespace DiscordMobileStatus
                 string title = S(p, tProps, "Title").Trim();
                 if (title.Length == 0) continue;
                 if (best != null && (best.Playing || !playing)) continue;
-                string app = Classify(title, S(s, tSession, "SourceAppUserModelId"));
+                string app = Classify(title, S(p, tProps, "Artist"), S(p, tProps, "AlbumTitle"), S(s, tSession, "SourceAppUserModelId"), playing);
                 if (app == null)
                 {
-                    if (playing) note = L.T("Đang phát \"" + U.Clean(title, 40) + "\" — không phải app được hỗ trợ", "Playing \"" + U.Clean(title, 40) + "\" — not a supported app");
+                    if (playing) note = L.T("Đang phát \"" + U.Clean(title, 40) + "\" — chưa nhận ra trang (bấm sang tab đó một lần)", "Playing \"" + U.Clean(title, 40) + "\" — site not recognized (switch to that tab once)");
                     continue;
                 }
                 Info i = new Info();
-                i.Title = U.Clean(title, 128);
+                i.Title = U.Clean(title.TrimStart('▶', '▷', '\uFE0F', ' '), 128);
                 i.Artist = U.Clean(S(p, tProps, "Artist"), 128);
                 i.Album = U.Clean(S(p, tProps, "AlbumTitle"), 128);
                 i.App = app;
+                // trang không khai báo bài -> Chrome để tên miền làm nghệ sĩ ("www.tiktok.com"): bỏ đi cho gọn
+                if (IsDomain(i.Artist)) i.Artist = "";
+                if (IsDomain(i.Album)) i.Album = "";
+                if (app == "soundcloud") i.Artist = Regex.Replace(i.Artist, @"\s*\|\s*SoundCloud$", "", RegexOptions.IgnoreCase);
                 i.Playing = playing;
                 try
                 {
@@ -1218,6 +1292,8 @@ namespace DiscordMobileStatus
         readonly AutoResetEvent wake = new AutoResetEvent(false);
         Track track;          // từ điện thoại
         Track pcTrack;        // từ trình duyệt trên PC
+        string pcSocialApp;   // phiên lướt TikTok / Instagram trên PC: đếm giờ cả phiên, không theo từng video
+        long pcSocialStart, pcSocialSeen;
         GameTrack game;       // game đang chơi trên điện thoại
         Track social;         // đang lướt TikTok / Instagram trên điện thoại
         bool replaying;       // đang đọc lại tin cũ lúc khởi động (bỏ qua tìm ảnh bìa)
@@ -1397,12 +1473,36 @@ namespace DiscordMobileStatus
                     }
                     long now = U.NowMs();
                     long start = now - i.PositionMs;
+                    bool shortVid = i.App == "tiktok" || i.App == "instagram";
+                    if (shortVid)
+                    {
+                        // tên phát là tên trang -> ghi "Lướt video ngắn"; đếm thời gian cả phiên lướt, không theo từng video
+                        // "Chú thích video | TikTok" / "Reels • Instagram" -> bỏ đuôi tên trang
+                        string cap = Regex.Replace(i.Title, @"\s*[|•\-–]\s*(TikTok|Instagram)( Reels?)?\s*$", "", RegexOptions.IgnoreCase).Trim();
+                        string nt = cap.ToLowerInvariant();
+                        if (nt.Length == 0 || nt == "tiktok" || nt.StartsWith("tiktok - ") || nt.StartsWith("tiktok – ") || nt.StartsWith("instagram") || nt == "reels" || nt == "for you" || nt == "dành cho bạn")
+                            i.Title = L.T("Lướt video ngắn", "Scrolling short videos");
+                        else i.Title = U.Clean(cap, 128);
+                        i.DurationMs = 0;
+                        // nghỉ dưới 60 giây giữa hai video (chuyển video, tạm dừng) vẫn tính là cùng một phiên
+                        if (i.Playing)
+                        {
+                            if (pcSocialApp == i.App && now - pcSocialSeen < 60000) start = pcSocialStart;
+                            else { pcSocialApp = i.App; pcSocialStart = start; }
+                            pcSocialSeen = now;
+                        }
+                    }
                     bool same = old != null && old.Title == i.Title && old.Artist == i.Artist && old.App == i.App
                                 && old.Playing == i.Playing && old.DurationMs == i.DurationMs
-                                && (!i.Playing || old.IsSocial || Math.Abs(old.StartMs - start) < 5000);   // TikTok lặp video -> không đếm lại
+                                && (!i.Playing || (shortVid ? old.StartMs == start : Math.Abs(old.StartMs - start) < 5000));   // TikTok lặp video -> không đếm lại
                     if (same)
                     {
-                        if (old.Playing) old.ReceivedMs = now;      // vẫn đang phát bài cũ
+                        if (old.Playing)
+                        {
+                            bool stale = now - old.ReceivedMs > Track.PcSilentMs;   // vừa bị ẩn vì lâu không đọc được -> hiện lại
+                            old.ReceivedMs = now;      // vẫn đang phát bài cũ
+                            if (stale) wake.Set();
+                        }
                         continue;
                     }
                     Track t = new Track();
@@ -1424,6 +1524,7 @@ namespace DiscordMobileStatus
                     if (newSong && !t.IsSocial)
                     {
                         string url = CoverForPc(c, t);
+                        lock (trackLock) { if (pcTrack == t) t.ReceivedMs = U.NowMs(); }     // tìm ảnh lâu -> đừng để bài bị coi là đã tắt
                         if (url.Length > 0)
                         {
                             lock (trackLock) { if (pcTrack == t) t.Cover = url; }
@@ -1433,6 +1534,10 @@ namespace DiscordMobileStatus
                 }
                 catch (Exception e)
                 {
+                    // đọc lỗi -> không giữ bài cũ (tránh tắt tab rồi mà Discord vẫn hiện)
+                    bool had2;
+                    lock (trackLock) { had2 = pcTrack != null; pcTrack = null; }
+                    if (had2) wake.Set();
                     if (!failedOnce) Log.W("Đọc trình duyệt lỗi: " + e.GetBaseException().GetType().Name + ": " + e.GetBaseException().Message);
                     failedOnce = true;
                     Status4(null, () => L.T("Lỗi đọc trình duyệt — xem DiscordMobileStatus.log", "Cannot read the browser — see DiscordMobileStatus.log"), null, null);
@@ -2559,7 +2664,7 @@ namespace DiscordMobileStatus
             L.En = cfg.Lang == "en";
             AutoStart.Refresh();
             allowShow = !startHidden;
-            Log.W("Khởi động Discord Mobile Status 1.2.0, cấu hình: " + Config.FilePath);
+            Log.W("Khởi động Discord Mobile Status 1.2.1, cấu hình: " + Config.FilePath);
 
             BuildUi();
             ApplyLang();
