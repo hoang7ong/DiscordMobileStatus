@@ -598,7 +598,7 @@ namespace DiscordMobileStatus
             if (phoneSocial)
             {
                 // ứng dụng Discord đã mang tên "TikTok" / "Instagram" -> chỉ cần ghi nơi xem
-                act["details"] = U.Fit(L.T("Lướt video ngắn", "Scrolling short videos"));
+                act["details"] = U.Fit(L.T("Lướt ", "Scrolling ") + appName);
                 act["state"] = U.Fit(L.OnMobile());
             }
             else
@@ -771,7 +771,10 @@ namespace DiscordMobileStatus
 
         /// <summary>Tên MỌI tab của các cửa sổ trình duyệt (kể cả tab đang bị che), đọc qua UI Automation của Windows.
         /// Chỉ gọi khi không nhận ra trang bằng tiêu đề cửa sổ, vì tốn hơn.</summary>
-        static List<string> TabTitles()
+        static List<string> TabTitles() { return Uia(BrowserWindows(null), ReadTabs); }
+
+        /// <summary>Cửa sổ trình duyệt đang hiện (Chrome, Edge, Cốc Cốc, Brave, Opera, Firefox). probe != null: chỉ cửa sổ có tên bài.</summary>
+        static List<IntPtr> BrowserWindows(string probe)
         {
             List<IntPtr> hs = new List<IntPtr>();
             EnumWindows(delegate (IntPtr h, IntPtr lp)
@@ -780,14 +783,46 @@ namespace DiscordMobileStatus
                 StringBuilder cn = new StringBuilder(64);
                 GetClassName(h, cn, cn.Capacity);
                 string c = cn.ToString();
-                if (c != "Chrome_WidgetWin_1" && c != "MozillaWindowClass") return true;      // Chrome, Edge, Cốc Cốc, Brave, Opera / Firefox
+                if (c != "Chrome_WidgetWin_1" && c != "MozillaWindowClass") return true;
                 int n = GetWindowTextLength(h);
                 if (n <= 0 || n > 1000) return true;
                 StringBuilder sb = new StringBuilder(n + 1);
                 GetWindowText(h, sb, sb.Capacity);
-                if (IsBrowserWindow(Norm(sb.ToString()))) hs.Add(h);                        // bỏ Discord, VS Code… (cũng là Chrome_WidgetWin_1)
+                string w = Norm(sb.ToString());
+                if (IsBrowserWindow(w) && (probe == null || Match(w, probe))) hs.Add(h);   // bỏ Discord, VS Code… (cũng là Chrome_WidgetWin_1)
                 return true;
             }, IntPtr.Zero);
+            return hs;
+        }
+
+        /// <summary>Địa chỉ trang trên thanh địa chỉ của các cửa sổ (tab đang xem của mỗi cửa sổ).</summary>
+        static List<string> Urls(List<IntPtr> hs) { return Uia(hs, ReadUrl); }
+
+        static void ReadUrl(IntPtr h, List<string> found)
+        {
+            AutomationElement root = AutomationElement.FromHandle(h);
+            // ô nhập đầu tiên của cửa sổ = thanh địa chỉ (nằm trước nội dung trang)
+            AutomationElement edit = root.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
+            if (edit == null) return;
+            object v = edit.GetCurrentPropertyValue(ValuePattern.ValueProperty, true);
+            string u = v as string;
+            if (u != null && Regex.IsMatch(u.Trim(), @"^(https?://)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(/|$)", RegexOptions.IgnoreCase)) found.Add(u.Trim().ToLowerInvariant());
+        }
+
+        /// <summary>Trang nào theo địa chỉ; null = không phải trang hỗ trợ.</summary>
+        static string SiteOfUrl(string u)
+        {
+            if (Regex.IsMatch(u, @"(^|[/.])music\.youtube\.com")) return "ytmusic";
+            if (Regex.IsMatch(u, @"(^|[/.])(youtube\.com|youtu\.be)")) return "youtube";
+            if (Regex.IsMatch(u, @"(^|[/.])soundcloud\.com")) return "soundcloud";
+            if (Regex.IsMatch(u, @"(^|[/.])tiktok\.com")) return "tiktok";
+            if (Regex.IsMatch(u, @"(^|[/.])instagram\.com")) return "instagram";
+            return null;
+        }
+
+        /// <summary>Chạy việc đọc UI Automation trên luồng riêng, quá 2,5 giây thì bỏ (trình duyệt bận không làm treo app).</summary>
+        static List<string> Uia(List<IntPtr> hs, Action<IntPtr, List<string>> work)
+        {
             List<string> list = new List<string>();
             if (hs.Count == 0) return list;
             lock (TabLock)
@@ -800,9 +835,11 @@ namespace DiscordMobileStatus
             {
                 try
                 {
-                    foreach (IntPtr h in hs) ReadTabs(h, found);
+                    foreach (IntPtr h in hs)
+                    {
+                        try { work(h, found); } catch (Exception) { }
+                    }
                 }
-                catch (Exception) { }
                 finally { lock (TabLock) tabBusy = false; }
             });
             th.IsBackground = true;
@@ -1008,12 +1045,12 @@ namespace DiscordMobileStatus
             lock (AppCache) known = AppCache.ContainsKey(title);
             if (app == null && br && playing && !known)
             {
-                // tab đang phát bị tab khác che -> đọc tên mọi tab (tối đa 1 lần / phút cho mỗi bài)
+                // tiêu đề không đủ -> đọc thanh địa chỉ / tên mọi tab (tối đa 1 lần / 20 giây cho mỗi bài)
                 bool due;
                 lock (TabScanAt)
                 {
                     DateTime last;
-                    due = !TabScanAt.TryGetValue(title, out last) || (DateTime.UtcNow - last).TotalSeconds > 60;
+                    due = !TabScanAt.TryGetValue(title, out last) || (DateTime.UtcNow - last).TotalSeconds > 20;
                     if (due)
                     {
                         if (TabScanAt.Count > 200) TabScanAt.Clear();
@@ -1022,24 +1059,35 @@ namespace DiscordMobileStatus
                 }
                 if (due)
                 {
-                    List<string> tr = new List<string>(), tw = new List<string>();
-                    foreach (string t in TabTitles())
+                    // a) cửa sổ đang mở đúng tab đó (tên trang không ghi tên web, vd. SoundCloud "Bài in Playlist") -> đọc thanh địa chỉ
+                    foreach (string u in Urls(BrowserWindows(probe)))
                     {
-                        string nw = Norm(t);
-                        if (Match(nw, probe)) { tr.Add(t); tw.Add(nw); }      // chỉ giữ tab có đúng tên bài
+                        app = SiteOfUrl(u);
+                        if (app != null) { sure = true; break; }
                     }
-                    foreach (string w in tw)
-                        if (Has(w, "youtube")) { app = Has(w, "youtube music") ? "ytmusic" : "youtube"; sure = true; break; }
-                    if (app == null && tw.Count > 0)
+                    // b) tab đang phát bị tab khác che -> đọc tên mọi tab
+                    if (app == null)
                     {
-                        app = SiteOf(nt, probe, artist, album, tr, tw);
-                        if (app != null) sure = true;
+                        List<string> tr = new List<string>(), tw = new List<string>();
+                        foreach (string t in TabTitles())
+                        {
+                            string nw = Norm(t);
+                            if (Match(nw, probe)) { tr.Add(t); tw.Add(nw); }      // chỉ giữ tab có đúng tên bài
+                        }
+                        foreach (string w in tw)
+                            if (Has(w, "youtube")) { app = Has(w, "youtube music") ? "ytmusic" : "youtube"; sure = true; break; }
+                        if (app == null && tw.Count > 0)
+                        {
+                            app = SiteOf(nt, probe, artist, album, tr, tw);
+                            if (app != null) sure = true;
+                        }
+                        raw.AddRange(tr);
+                        wins.AddRange(tw);
                     }
-                    raw.AddRange(tr);
-                    wins.AddRange(tw);
                 }
             }
             List<string> hit = null;
+            bool fromMem = false;
             lock (AppCache)
             {
                 if (app == null) AppCache.TryGetValue(title, out app);     // tab bị che bởi tab khác -> nhớ lần nhận ra trước
@@ -1047,9 +1095,13 @@ namespace DiscordMobileStatus
                 {
                     hit = new List<string>();
                     foreach (string w in wins) if (Match(w, probe)) hit.Add(U.Clean(w.Replace(TabMark, " [tab]"), 120));
-                    // tab đang bị che và trình duyệt này vừa phát SoundCloud / YouTube… chưa tới 90 giây -> bài kế tiếp tự chạy của cùng trang
+                    // trình duyệt này vừa phát SoundCloud / YouTube… chưa tới 90 giây -> bài kế tiếp tự chạy của cùng trang
+                    // (tab bị che, tên tab không ghi tên web). Tên tab mang tên web khác thì không đoán.
+                    bool otherSite = false;
+                    foreach (string w in hit)
+                        foreach (string o in OtherPlayers) if (Has(w, o)) { otherSite = true; break; }
                     KeyValuePair<string, DateTime> m;
-                    if (hit.Count == 0 && SiteMem.TryGetValue(src, out m) && (DateTime.UtcNow - m.Value).TotalSeconds < 90) app = m.Key;
+                    if (!otherSite && SiteMem.TryGetValue(src, out m) && (DateTime.UtcNow - m.Value).TotalSeconds < 90) { app = m.Key; fromMem = true; }
                 }
                 if (app == null)
                     foreach (string w in wins)
@@ -1061,7 +1113,7 @@ namespace DiscordMobileStatus
                 {
                     if (AppCache.Count > 300) AppCache.Clear();
                     AppCache[title] = app;
-                    if (sure && playing) SiteMem[src] = new KeyValuePair<string, DateTime>(app, DateTime.UtcNow);
+                    if ((sure || fromMem) && playing) SiteMem[src] = new KeyValuePair<string, DateTime>(app, DateTime.UtcNow);
                 }
                 else if (br && LoggedUnknown.Count < 50 && LoggedUnknown.Add(title))
                 {
@@ -1607,12 +1659,12 @@ namespace DiscordMobileStatus
                     bool shortVid = i.App == "tiktok" || i.App == "instagram";
                     if (shortVid)
                     {
-                        // tên phát là tên trang -> ghi "Lướt video ngắn"; đếm thời gian cả phiên lướt, không theo từng video
+                        // tên phát là tên trang -> ghi "Lướt TikTok" / "Lướt Instagram"; đếm thời gian cả phiên lướt, không theo từng video
                         // "Chú thích video | TikTok" / "Reels • Instagram" -> bỏ đuôi tên trang
                         string cap = Regex.Replace(i.Title, @"\s*[|•\-–]\s*(TikTok|Instagram)( Reels?)?\s*$", "", RegexOptions.IgnoreCase).Trim();
                         string nt = cap.ToLowerInvariant();
                         if (nt.Length == 0 || nt == "tiktok" || nt.StartsWith("tiktok - ") || nt.StartsWith("tiktok – ") || nt.StartsWith("instagram") || nt == "reels" || nt == "for you" || nt == "dành cho bạn")
-                            i.Title = L.T("Lướt video ngắn", "Scrolling short videos");
+                            i.Title = L.T("Lướt ", "Scrolling ") + Track.AppName(i.App);
                         else i.Title = U.Clean(cap, 128);
                         i.DurationMs = 0;
                         // nghỉ dưới 60 giây giữa hai video (chuyển video, tạm dừng) vẫn tính là cùng một phiên
@@ -1833,7 +1885,7 @@ namespace DiscordMobileStatus
                 }
                 if (myGen != gen) return id;
                 lock (trackLock) social = so;
-                Log.W("Điện thoại (mxh): " + (so == null ? "(thoát)" : so.App));
+                Log.W("Điện thoại (mxh): " + (so == null ? "(thoát)" : so.App + (Cfg.Shares(so) ? "" : " — đang TẮT chia sẻ " + Track.AppName(so.App) + " trên máy tính")));
                 wake.Set();
                 return id;
             }
